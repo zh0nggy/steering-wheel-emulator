@@ -1,13 +1,19 @@
 package com.tiltwheel.controller
 
+import android.Manifest.permission.ACCESS_LOCAL_NETWORK
 import android.app.Activity
 import android.app.AlertDialog
+import android.content.Intent
+import android.content.pm.PackageManager.PERMISSION_DENIED
+import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.Settings
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -51,6 +57,7 @@ class MainActivity : Activity() {
     private lateinit var connectPage: View
     private lateinit var steerPage: View
     private lateinit var pcList: LinearLayout
+    private lateinit var localNetworkButton: Button
     private lateinit var hostField: EditText
     private lateinit var targetLabel: TextView
     private lateinit var steerBar: Bar
@@ -61,6 +68,7 @@ class MainActivity : Activity() {
     private val prefs by lazy { getSharedPreferences("tiltwheel", MODE_PRIVATE) }
     private var shownPcs: List<Discovery.Pc>? = null
     private var port = Protocol.DEFAULT_PORT
+    private var resumed = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,12 +82,14 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        resumed = true
         sensor.start()
-        discovery.start()
+        updateLocalNetworkAccess()
         ui.post(refresh)
     }
 
     override fun onPause() {
+        resumed = false
         // Leaving the app (call, home button) must never leave the car
         // steering: stop() sends centred frames on the way out. You come back
         // to the Connect page and tap Start sending again.
@@ -153,6 +163,8 @@ class MainActivity : Activity() {
         }
         pcList = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         box.addView(pcList)
+        localNetworkButton = button(getString(R.string.allow_local_network)) { requestLocalNetworkAccess() }
+        box.addView(localNetworkButton)
 
         val ipRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
         ipRow.addView(text("IP"), LinearLayout.LayoutParams(dp(28), LinearLayout.LayoutParams.WRAP_CONTENT))
@@ -214,7 +226,50 @@ class MainActivity : Activity() {
 
     // --- behaviour ---
 
+    private fun hasLocalNetworkAccess(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.CINNAMON_BUN ||
+            checkSelfPermission(ACCESS_LOCAL_NETWORK) == PERMISSION_GRANTED
+
+    private fun updateLocalNetworkAccess() {
+        val allowed = hasLocalNetworkAccess()
+        localNetworkButton.visibility = if (allowed) View.GONE else View.VISIBLE
+        pcList.visibility = if (allowed) View.VISIBLE else View.GONE
+        if (allowed && resumed) discovery.start()
+    }
+
+    private fun requestLocalNetworkAccess() {
+        requestPermissions(arrayOf(ACCESS_LOCAL_NETWORK), LOCAL_NETWORK_REQUEST)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != LOCAL_NETWORK_REQUEST) return
+
+        updateLocalNetworkAccess()
+        if (grantResults.firstOrNull() == PERMISSION_DENIED &&
+            !shouldShowRequestPermissionRationale(ACCESS_LOCAL_NETWORK)
+        ) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.allow_local_network)
+                .setMessage(R.string.local_network_settings_message)
+                .setPositiveButton(R.string.open_app_settings) { _, _ ->
+                    val appUri = Uri.fromParts("package", packageName, null)
+                    startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, appUri))
+                }
+                .setNegativeButton(android.R.string.cancel, null)
+                .show()
+        }
+    }
+
     private fun startSending() {
+        if (!hasLocalNetworkAccess()) {
+            requestLocalNetworkAccess()
+            return
+        }
         val host = hostField.text.toString().trim()
         if (host.isEmpty()) {
             message("Pick your PC from the list, or type its IP.\n\n" +
@@ -293,6 +348,8 @@ class MainActivity : Activity() {
     }
 
     companion object {
+        private const val LOCAL_NETWORK_REQUEST = 1
+
         /** Port of mac_sender.is_private: true/false for an IPv4, null for a hostname. */
         fun isPrivate(host: String): Boolean? {
             val parts = host.split(".")
