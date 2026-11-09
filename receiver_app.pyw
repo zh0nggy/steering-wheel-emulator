@@ -121,7 +121,7 @@ class ReceiverEngine:
         steer = throttle = brake = 0.0
         mask = 0
         received = dropped = 0
-        last_seq = -1
+        last_seq = None
         next_ping = next_layout = 0.0
         st = self.status
 
@@ -130,8 +130,11 @@ class ReceiverEngine:
             now = time.monotonic()
             beacon.tick()
 
-            # Keep only the newest frame, exactly as pad_receiver.py does.
-            newest = sender = None
+            # Keep the latest sequence from the active sender, even if UDP
+            # delivers an older frame later or in a different drain cycle.
+            newest = None
+            sender = self._sender_addr
+            newest_seq = last_seq
             while True:
                 try:
                     data, addr = sock.recvfrom(protocol.PACKET_SIZE * 4)
@@ -144,7 +147,6 @@ class ReceiverEngine:
                     continue
                 frame = protocol.unpack(data)
                 if frame is not None:
-                    newest, sender = frame, addr
                     # Echo the sender's own timestamp so it can measure the
                     # round trip. Done per frame, before any processing, so
                     # the number reflects the network rather than this loop.
@@ -152,9 +154,16 @@ class ReceiverEngine:
                         sock.sendto(app_common.pack_echo(frame["timestamp"]), addr)
                     except OSError:
                         pass
-            if sender is not None:
+                    seq = frame["seq"]
+                    if addr != sender:
+                        last_seq = None  # each sender socket has its own sequence
+                    elif newest_seq is not None:
+                        advance = (seq - newest_seq) & 0xFFFFFFFF
+                        if not 0 < advance < 0x80000000:
+                            continue  # duplicate or older frame, even across wraparound
+                    newest, sender, newest_seq = frame, addr, seq
+            if newest is not None:
                 self._sender_addr = sender
-                sender = sender[0]
 
             # Our own ping to the Mac, ~10 per second, so this window can show
             # a ping too. Only while linked: there's nobody to ping otherwise.
@@ -180,10 +189,9 @@ class ReceiverEngine:
 
             if newest is not None:
                 received += 1
-                # A smaller seq means the sender restarted; don't count it as loss.
-                if last_seq >= 0 and newest["seq"] > last_seq + 1:
-                    dropped += newest["seq"] - last_seq - 1
-                last_seq = newest["seq"]
+                if last_seq is not None:
+                    dropped += ((newest_seq - last_seq) & 0xFFFFFFFF) - 1
+                last_seq = newest_seq
                 failsafe.note_packet()
 
                 target = -newest["steer"] if cfg["invert"] else newest["steer"]
@@ -197,13 +205,14 @@ class ReceiverEngine:
                 throttle = newest["right_trigger"]
                 brake = newest["left_trigger"]
                 mask = newest["buttons"]
-                st["sender"] = sender
+                st["sender"] = sender[0]
 
             stale = failsafe.is_stale()
             if stale:
                 # Release everything, so a lost link can't leave a button held.
                 steer = throttle = brake = 0.0
                 mask = 0
+                last_seq = None  # allow a sender to restart after a disconnect
             buttons.update(pad, mask)
 
             if pad is not None:
