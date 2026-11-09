@@ -14,9 +14,8 @@ import java.net.SocketTimeoutException
  * The receiver also sends the button layout from its Phone layout window;
  * the newest one is in `layout` for the screen to draw.
  *
- * No tuning here: +-FULL_SCALE_DEGREES of rotation goes out as +-1, and the
- * receiver's Range (Android tuning), deadzone, gamma, smoothing and invert do
- * the rest.
+ * +-FULL_SCALE_DEGREES of virtual steering goes out as +-1. The receiver
+ * applies Range (Android tuning), deadzone, gamma, smoothing and invert.
  *
  * Sends when anything changes, capped at MAX_RATE (a button press goes out at
  * once), and at least every KEEPALIVE so the receiver's failsafe never fires
@@ -54,6 +53,7 @@ class Sender(private val sensor: SteeringSensor) {
 
     fun start(host: String, port: Int) {
         stop()
+        sensor.resetAcceleration()
         target = host
         running = true
         thread = Thread({ run(host, port) }, "sender").apply {

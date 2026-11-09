@@ -29,16 +29,18 @@ class SteeringSensor(context: Context) : SensorEventListener {
     }
 
     private val filter = OneEuroFilter()
+    private val acceleration = SteeringAcceleration(Sender.FULL_SCALE_DEGREES)
     private var unwrapped: Double? = null
     private var lastRaw = 0.0
     private var lastSampleAt: Double? = null
 
     /** Smoothed wheel angle in degrees (continuous, can pass +-180). */
-    @Volatile var angle: Double? = null
-        private set
+    private var angle: Double? = null
 
     /** Reading that becomes "straight ahead". Null until the first sample. */
-    @Volatile var centre: Double? = null
+    private var centre: Double? = null
+
+    @Volatile private var steeringOffset = 0.0
 
     fun setSmoothing(minCutoff: Double, beta: Double) {
         filter.minCutoff = minCutoff
@@ -57,18 +59,24 @@ class SteeringSensor(context: Context) : SensorEventListener {
         filter.reset()
         unwrapped = null
         lastSampleAt = null
+        angle = null
+        resetAcceleration()
     }
 
     fun calibrate() {
         centre = angle
+        resetAcceleration()
     }
 
-    /** Degrees from the calibrated centre, wrapped to -180..180. */
-    fun offset(): Double {
-        val a = angle ?: return 0.0
-        val c = centre ?: a.also { centre = it }
-        return wrapDegrees(a - c)
+    fun resetAcceleration() {
+        val a = angle
+        val c = centre
+        val offset = if (a != null && c != null) wrapDegrees(a - c) else 0.0
+        steeringOffset = acceleration.update(offset, 0.0)
     }
+
+    /** Virtual steering angle from the calibrated centre. */
+    fun offset() = steeringOffset
 
     override fun onSensorChanged(event: SensorEvent) {
         val (x, y, z) = Triple(event.values[0].toDouble(), event.values[1].toDouble(),
@@ -89,7 +97,10 @@ class SteeringSensor(context: Context) : SensorEventListener {
         val now = event.timestamp / 1e9
         val dt = lastSampleAt?.let { now - it } ?: 0.0
         lastSampleAt = now
-        angle = filter.update(cont, dt)
+        val filtered = filter.update(cont, dt)
+        angle = filtered
+        val c = centre ?: filtered.also { centre = it }
+        steeringOffset = acceleration.update(wrapDegrees(filtered - c), dt)
     }
 
     override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}

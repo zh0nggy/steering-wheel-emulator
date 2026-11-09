@@ -41,6 +41,39 @@ class OneEuroFilter(
     }
 }
 
+/** Adds more virtual rotation per degree when the phone moves quickly. */
+class SteeringAcceleration(private val fullScale: Double) {
+    private var lastOffset: Double? = null
+    private var correction = 0.0
+
+    fun update(offset: Double, dt: Double): Double {
+        val previous = lastOffset
+        lastOffset = offset
+        val magnitude = abs(offset)
+        val centreTolerance = 0.5
+        if (previous == null || magnitude <= centreTolerance || offset * previous < 0.0 ||
+            dt <= 0.0 || dt > 0.1) {
+            correction = 0.0
+            return offset
+        }
+
+        val delta = offset - previous
+        val speed = abs(delta) / dt
+        // Smoothly increase gain from 1x at 30 deg/s to 1.8x at 200 deg/s.
+        val t = ((speed - 30.0) / 170.0).coerceIn(0.0, 1.0)
+        val extraGain = 0.8 * t * t * (3.0 - 2.0 * t)
+        val direction = if (offset > 0.0) 1.0 else -1.0
+
+        // Bound the accumulated correction so repeated flicks can't wind it up.
+        // On a fast return, allow less steering but keep it on the same side.
+        val maxCorrection = (fullScale - magnitude).coerceIn(0.0, 20.0)
+        correction = (correction + direction * delta * extraGain)
+            .coerceIn(-0.5 * magnitude, maxCorrection)
+        val centreBlend = ((magnitude - centreTolerance) / (12.0 - centreTolerance)).coerceAtMost(1.0)
+        return offset + direction * correction * centreBlend
+    }
+}
+
 /** Port of app_common.RollingStats: average and max of the last `window` seconds. */
 class RollingStats(private val window: Double = 1.0) {
     private val samples = ArrayDeque<Pair<Double, Double>>()
