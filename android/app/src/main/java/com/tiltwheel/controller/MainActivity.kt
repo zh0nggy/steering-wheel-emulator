@@ -283,7 +283,6 @@ class MainActivity : Activity() {
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
         val strip = toolbar()
-        strip.addView(button("Edit controls") { beginEditing() })
         targetLabel = text("", 12f, Theme.MUTED)
         strip.addView(targetLabel)
         steerBar = Bar(this, Theme.STEER, centered = true).apply { contentDescription = "Steering" }
@@ -291,7 +290,10 @@ class MainActivity : Activity() {
             marginStart = dp(12); marginEnd = dp(12)
         })
         strip.addView(button("Calibrate centre") { sensor.calibrate() })
-        strip.addView(button("Stop") { stopSending() })
+        strip.addView(button("Edit controls") { beginEditing() },
+            LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
+        strip.addView(button("Stop") { stopSending() },
+            LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) })
         addToolbar(column, strip)
 
         buttonLayer = ButtonLayer(this) { mask, rt, lt ->
