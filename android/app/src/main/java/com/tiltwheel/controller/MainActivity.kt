@@ -298,7 +298,7 @@ class MainActivity : Activity() {
             removeControl.isEnabled = selected != null
             editorHint.text = when {
                 boxes.isEmpty() -> "No controls selected"
-                selected != null -> "Drag the corner to resize"
+                selected != null -> "Pinch or drag the corner to resize"
                 else -> "Drag a control to move it"
             }
         }.apply { setBackgroundColor(Theme.TROUGH) }
