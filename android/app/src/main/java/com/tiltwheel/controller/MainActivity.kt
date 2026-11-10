@@ -267,16 +267,20 @@ class MainActivity : Activity() {
     private fun buildEditPage(): View {
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val strip = toolbar()
+        val gap = dp(8)
         strip.addView(button("Back") { showPage(Page.PICK) })
         editorHint = text("", 12f, Theme.MUTED)
-        strip.addView(editorHint, LinearLayout.LayoutParams(0, -2, 1f))
+        strip.addView(editorHint, LinearLayout.LayoutParams(0, -2, 1f).apply {
+            marginStart = gap
+            marginEnd = gap
+        })
         strip.addView(button("Reset") { editor.show(ControlLayout.reset(draft)) })
         removeControl = button("Remove") { editor.removeSelected() }
-        strip.addView(removeControl)
+        strip.addView(removeControl, LinearLayout.LayoutParams(-2, -2).apply { marginStart = gap })
         cancelLayout = button("Cancel") { finishEditing(false) }
-        strip.addView(cancelLayout)
+        strip.addView(cancelLayout, LinearLayout.LayoutParams(-2, -2).apply { marginStart = gap })
         applyLayout = button("Save & continue") { finishEditing(true) }
-        strip.addView(applyLayout)
+        strip.addView(applyLayout, LinearLayout.LayoutParams(-2, -2).apply { marginStart = gap })
         addToolbar(column, strip)
         editor = LayoutEditor(this) { boxes, selected ->
             draft = boxes
