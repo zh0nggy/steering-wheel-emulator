@@ -165,10 +165,13 @@ class MainActivity : Activity() {
         steerPage = buildSteerPage()
         pickPage = buildPickPage()
         editPage = buildEditPage()
+        val topGap = dp(4)
         val root = FrameLayout(this).apply {
             setBackgroundColor(Theme.BACKGROUND)
-            setPadding(dp(24), dp(16), dp(24), dp(16))
-            addView(connectPage)
+            setPadding(dp(24), topGap, dp(24), dp(16))
+            addView(connectPage, FrameLayout.LayoutParams(-1, -1).apply {
+                topMargin = dp(16) - topGap
+            })
             addView(steerPage)
             addView(pickPage)
             addView(editPage)
@@ -179,7 +182,7 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             root.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-                view.setPadding(bars.left + dp(24), bars.top + dp(16), bars.right + dp(24), bars.bottom + dp(16))
+                view.setPadding(bars.left + dp(24), bars.top + topGap, bars.right + dp(24), bars.bottom + dp(16))
                 insets
             }
         }
@@ -214,10 +217,16 @@ class MainActivity : Activity() {
             setHintTextColor(Theme.MUTED)
         }
         ipRow.addView(hostField, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        ipRow.addView(button("Start sending") { startSending() })
-        box.addView(ipRow)
+        ipRow.addView(
+            button("Start sending") { startSending() },
+            LinearLayout.LayoutParams(-2, -2).apply { marginStart = dp(8) },
+        )
+        box.addView(ipRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         column.addView(box)
-        column.addView(button("Edit controls") { beginEditing() })
+        column.addView(
+            button("Edit controls") { beginEditing() },
+            LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) },
+        )
         return column
     }
 
@@ -240,7 +249,10 @@ class MainActivity : Activity() {
         val strip = toolbar()
         pickedCount = text("", 15f)
         strip.addView(pickedCount, LinearLayout.LayoutParams(0, -2, 1f))
-        strip.addView(button("Cancel") { finishEditing(false) }.apply { tag = "cancel_setup" })
+        strip.addView(
+            button("Cancel") { finishEditing(false) }.apply { tag = "cancel_setup" },
+            LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) },
+        )
         strip.addView(button("Next") { showPage(Page.EDIT) })
         addToolbar(column, strip)
         picker = ControllerPicker(this) { target ->
