@@ -166,15 +166,17 @@ class MainActivity : Activity() {
         pickPage = buildPickPage()
         editPage = buildEditPage()
         val topGap = dp(4)
+        val bottomGap = dp(16)
         val root = FrameLayout(this).apply {
             setBackgroundColor(Theme.BACKGROUND)
-            setPadding(dp(24), topGap, dp(24), dp(16))
+            setPadding(dp(24), topGap, dp(24), 0)
             addView(connectPage, FrameLayout.LayoutParams(-1, -1).apply {
                 topMargin = dp(16) - topGap
+                bottomMargin = bottomGap
             })
-            addView(steerPage)
+            addView(steerPage, FrameLayout.LayoutParams(-1, -1).apply { bottomMargin = bottomGap })
             addView(pickPage)
-            addView(editPage)
+            addView(editPage, FrameLayout.LayoutParams(-1, -1).apply { bottomMargin = bottomGap })
         }
         // Android 15+ draws apps under the status and navigation bars.
         // Pad by their size (and any camera cutout) so nothing is hidden.
@@ -182,7 +184,7 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             root.setOnApplyWindowInsetsListener { view, insets ->
                 val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
-                view.setPadding(bars.left + dp(24), bars.top + topGap, bars.right + dp(24), bars.bottom + dp(16))
+                view.setPadding(bars.left + dp(24), bars.top + topGap, bars.right + dp(24), bars.bottom)
                 insets
             }
         }
@@ -245,7 +247,6 @@ class MainActivity : Activity() {
     }
 
     private fun buildPickPage(): View {
-        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val strip = toolbar()
         pickedCount = text("", 15f)
         strip.addView(pickedCount, LinearLayout.LayoutParams(0, -2, 1f))
@@ -254,14 +255,24 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) },
         )
         strip.addView(button("Next") { showPage(Page.EDIT) })
-        addToolbar(column, strip)
         picker = ControllerPicker(this) { target ->
             draft = if (draft.any { it.target == target }) draft.filterNot { it.target == target }
                 else ControlLayout.add(draft, target)
             updatePicker()
         }
-        canvasArea(column, picker)
-        return column
+        return object : FrameLayout(this) {
+            override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+                measureChild(strip, widthMeasureSpec, heightMeasureSpec)
+                val titleWidth = minOf(pickedCount.measuredWidth.toFloat(),
+                    pickedCount.paint.measureText(pickedCount.text.toString()))
+                val actionsWidth = strip.measuredWidth - pickedCount.measuredWidth
+                picker.setToolbarClearance(strip.measuredHeight, maxOf(titleWidth, actionsWidth.toFloat()) + dp(8))
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+            }
+        }.apply {
+            addView(picker, FrameLayout.LayoutParams(-1, -1))
+            addView(strip, FrameLayout.LayoutParams(-1, dp(52)))
+        }
     }
 
     private fun buildEditPage(): View {
