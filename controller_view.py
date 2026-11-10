@@ -118,22 +118,13 @@ class ControllerView(tk.Frame):
                                    command=self.reset)
         self.canvas.create_window(self.W - 4, 3, window=self.reset_btn, anchor="ne")
         self._draw()
-        # Bumpers end at y=74; drop the body (and everything on it) so its top
-        # edge is one ROW_GAP below them.
-        body_shift = 74 + self.ROW_GAP - self.BODY_TOP
-        for item in self.canvas.find_all():
-            if self.canvas.type(item) != "window" and self.canvas.bbox(item)[1] >= 76:
-                self.canvas.move(item, 0, body_shift)
-        self.body_shift = body_shift
-        # Same gap under Reset as between the trigger and bumper rows (and
-        # bumpers -> body). Measured, because the button's height depends on
-        # the platform font.
-        top = 3 + self.reset_btn.winfo_reqheight() + self.ROW_GAP - self.TRIGGER_TOP
+        self.body_shift = self._space_shoulders()
+        top = self._drawing_top()
         drawn = [i for i in self.canvas.find_all() if self.canvas.type(i) != "window"]
         for item in drawn:
             self.canvas.move(item, 0, top)
         # So fit_height() redraws the body where it now sits.
-        self.offset = top + body_shift
+        self.offset = top + self.body_shift
         # Fit the canvas to the drawing; fit_height() can stretch it later.
         lowest = max(self.canvas.bbox(i)[3] for i in drawn)
         self._natural_height = lowest + 2
@@ -156,6 +147,17 @@ class ControllerView(tk.Frame):
     BODY_TOP = 80      # top edge of the outline
     BODY_SPLIT = 210   # rows below this are the grips, which stretch
 
+    def _drawing_top(self):
+        return 3 + self.reset_btn.winfo_reqheight() + self.ROW_GAP - self.TRIGGER_TOP
+
+    def _space_shoulders(self):
+        # Bumpers end at y=74; separate the body from the key-binding rows.
+        shift = 74 + self.ROW_GAP - self.BODY_TOP
+        for item in self.canvas.find_all():
+            if self.canvas.type(item) != "window" and self.canvas.bbox(item)[1] >= 76:
+                self.canvas.move(item, 0, shift)
+        return shift
+
     def _draw(self):
         c = self.canvas
         mid = self.W / 2
@@ -172,12 +174,40 @@ class ControllerView(tk.Frame):
             c.create_text(x, y, text=text, fill=self.colors["label"], font=("Helvetica", 8, "bold"),
                           anchor="e" if x < mid else "w")
 
+        self._draw_front_controls()
+
+    STICK_CENTERS = ((118, 140), (268, 190))
+    FACE_CENTER = (334, 140)
+    FACE_SPACING = 27
+    SYSTEM_BUTTONS = (("GUIDE", 0, 113, 17), ("VIEW", -33, 147, 11), ("MENU", 33, 147, 11))
+    SYSTEM_ICONS = {}
+
+    def _draw_front_controls(self):
+        """The shared Xbox layout, independent of the shoulder artwork."""
+        c = self.canvas
+        mid = self.W / 2
         # Sticks: outer ring is the (unbindable) stick, inner disc is the click.
-        for target, (x, y) in (("LS", (118, 140)), ("RS", (268, 190))):
+        for target, (x, y) in zip(("LS", "RS"), self.STICK_CENTERS):
             c.create_oval(x - 30, y - 30, x + 30, y + 30, fill=self.colors["ring"],
                           outline=self.colors["outline"], width=2)
             self._button(target, c.create_oval(x - 19, y - 19, x + 19, y + 19), (x, y))
 
+        self._draw_dpad()
+
+        # Face buttons in the usual diamond.
+        fx, fy = self.FACE_CENTER
+        d, r = self.FACE_SPACING, 16
+        for target, (x, y) in (("Y", (fx, fy - d)), ("B", (fx + d, fy)),
+                               ("A", (fx, fy + d)), ("X", (fx - d, fy))):
+            self._button(target, c.create_oval(x - r, y - r, x + r, y + r), (x, y))
+
+        for target, dx, y, radius in self.SYSTEM_BUTTONS:
+            x = mid + dx
+            shape = c.create_oval(x - radius, y - radius, x + radius, y + radius)
+            self._button(target, shape, (x, y), icon_points=self.SYSTEM_ICONS.get(target))
+
+    def _draw_dpad(self):
+        c = self.canvas
         # D-pad: four arms around a centre square.
         cx, cy, a, w = 172, 190, 32, 12
         self._button("DPAD_UP", c.create_rectangle(cx - w, cy - a, cx + w, cy - w),
@@ -189,18 +219,6 @@ class ControllerView(tk.Frame):
         self._button("DPAD_RIGHT", c.create_rectangle(cx + w, cy - w, cx + a, cy + w),
                      (cx + a - 10, cy))
         c.create_rectangle(cx - w, cy - w, cx + w, cy + w, fill=self.colors["ring"], outline=self.colors["outline"])
-
-        # Face buttons in the usual diamond. Unbound, each shows its own
-        # letter inside (see _refresh); bound, it shows the key instead.
-        fx, fy, d, r = 334, 140, 27, 16
-        for target, (x, y) in (("Y", (fx, fy - d)), ("B", (fx + d, fy)),
-                               ("A", (fx, fy + d)), ("X", (fx - d, fy))):
-            self._button(target, c.create_oval(x - r, y - r, x + r, y + r), (x, y))
-
-        # Centre: Xbox button with View / Menu either side.
-        self._button("GUIDE", c.create_oval(mid - 17, 96, mid + 17, 130), (mid, 113))
-        self._button("VIEW", c.create_oval(mid - 44, 136, mid - 22, 158), (mid - 33, 147))
-        self._button("MENU", c.create_oval(mid + 22, 136, mid + 44, 158), (mid + 33, 147))
 
     def _body_points(self, stretch):
         """Outline coordinates with the grips pulled down by `stretch` px.
@@ -228,13 +246,17 @@ class ControllerView(tk.Frame):
         self.canvas.config(height=natural + stretch)
         return extra - stretch
 
-    def _button(self, target, item, text_at):
+    def _button(self, target, item, label_at, *, icon_points=None):
         c = self.canvas
         c.itemconfig(item, outline=self.colors["outline"], width=2, fill=self.colors["button"])
-        text = c.create_text(*text_at, text="", font=("Helvetica", 8))
+        if icon_points is None:
+            label = c.create_text(*label_at, text="", font=("Helvetica", 8))
+        else:
+            x, y = label_at
+            label = c.create_polygon([coord for dx, dy in icon_points for coord in (x + dx, y + dy)])
         self.shapes[target] = item
-        self.labels[target] = text
-        for tag in (item, text):
+        self.labels[target] = label
+        for tag in (item, label):
             c.tag_bind(tag, "<Button-1>", lambda _e, t=target: self.start_pick(t))
             c.tag_bind(tag, "<Enter>", lambda _e: c.config(cursor="hand2"))
             c.tag_bind(tag, "<Leave>", lambda _e: c.config(cursor=""))
