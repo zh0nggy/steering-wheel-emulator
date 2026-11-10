@@ -59,8 +59,6 @@ Tap **Stop**, or use the back button, to return to the PC selection page.
 
 On Windows, selecting **Android** opens the Phone layout window. While connected it shows the phone's layout, and you can still add, move, resize, or right-click to remove buttons there. Windows edits sync to the phone. If both devices edit the same layout at once, saving on the phone takes priority. Use matching app versions for editing on both devices.
 
-To bring over an older Windows layout, copy `phone_layout.json` from beside the receiver app to the phone. Choose **Import layout** on the button selection screen and save it in the editor.
-
 ### MacBook
 
 The Mac release is a ZIP of the sender scripts and launcher. It still needs Python and the sensor library; it is not a standalone macOS app.

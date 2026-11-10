@@ -25,7 +25,6 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import org.json.JSONObject
 
 /** Colours matching the Mac sender in dark mode (app_common.Bar and friends). */
 object Theme {
@@ -55,7 +54,6 @@ class MainActivity : Activity() {
     private lateinit var picker: ControllerPicker
     private lateinit var editor: LayoutEditor
     private lateinit var pickedCount: TextView
-    private lateinit var importLayout: Button
     private lateinit var removeControl: Button
     private lateinit var applyLayout: Button
     private lateinit var cancelLayout: Button
@@ -242,8 +240,6 @@ class MainActivity : Activity() {
         val strip = toolbar()
         pickedCount = text("", 15f)
         strip.addView(pickedCount, LinearLayout.LayoutParams(0, -2, 1f))
-        importLayout = button("Import layout") { chooseLayoutFile() }
-        strip.addView(importLayout)
         strip.addView(button("Cancel") { finishEditing(false) }.apply { tag = "cancel_setup" })
         strip.addView(button("Next") { showPage(Page.EDIT) })
         addToolbar(column, strip)
@@ -339,7 +335,6 @@ class MainActivity : Activity() {
     private fun updatePicker() {
         picker.show(draft.map { it.target }.toSet())
         pickedCount.text = "Choose buttons · ${draft.size} selected"
-        importLayout.visibility = if (sender.isRunning) View.GONE else View.VISIBLE
         pickPage.findViewWithTag<View>("cancel_setup").visibility =
             if (savedLayout != null || sender.isRunning) View.VISIBLE else View.GONE
     }
@@ -362,50 +357,6 @@ class MainActivity : Activity() {
     private fun finishEditing(apply: Boolean) {
         if (apply) storeLayout(draft)
         showPage(if (sender.isRunning) Page.DRIVE else Page.CONNECT)
-    }
-
-    private fun chooseLayoutFile() {
-        @Suppress("DEPRECATION")
-        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            addCategory(Intent.CATEGORY_OPENABLE)
-            type = "*/*"
-        }, IMPORT_LAYOUT_REQUEST)
-    }
-
-    @Deprecated("Uses the framework document picker without AndroidX.")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        val uri = data?.data ?: return
-        if (requestCode != IMPORT_LAYOUT_REQUEST || resultCode != RESULT_OK) return
-        val boxes = runCatching {
-            val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
-                val buffer = CharArray(1024)
-                val result = StringBuilder()
-                while (true) {
-                    val count = reader.read(buffer)
-                    if (count < 0) break
-                    require(result.length + count <= 16_384)
-                    result.append(buffer, 0, count)
-                }
-                result.toString()
-            } ?: error("No layout")
-            val rows = JSONObject(content).getJSONArray("boxes")
-            require(rows.length() <= ControlLayout.targets.size)
-            val parsed = (0 until rows.length()).map { i ->
-                val row = rows.getJSONObject(i)
-                val sized = row.has("w") && row.has("h")
-                val w = if (sized) row.getDouble("w") else 0.14
-                val h = if (sized) row.getDouble("h") else 0.18
-                Protocol.Box(row.getString("target"), row.getDouble("x") * (if (sized) 1.0 else 1 - w),
-                    row.getDouble("y") * (if (sized) 1.0 else 1 - h), w, h)
-            }
-            ControlLayout.parseRows(ControlLayout.rows(parsed)) ?: error("Invalid boxes")
-        }.getOrNull()
-        if (boxes == null) message("Couldn't import that file. Choose phone_layout.json from Tilt Wheel on Windows.")
-        else {
-            draft = boxes
-            showPage(Page.EDIT)
-        }
     }
 
     // --- behaviour ---
@@ -537,7 +488,6 @@ class MainActivity : Activity() {
 
     companion object {
         private const val LOCAL_NETWORK_REQUEST = 1
-        private const val IMPORT_LAYOUT_REQUEST = 2
 
         /** Port of mac_sender.is_private: true/false for an IPv4, null for a hostname. */
         fun isPrivate(host: String): Boolean? {
