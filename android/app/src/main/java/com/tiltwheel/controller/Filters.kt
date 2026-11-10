@@ -114,6 +114,10 @@ class Ramp(riseSeconds: Double = 0.35, fallSeconds: Double = 0.18) {
     var value = 0.0
         private set
 
+    fun reset() {
+        value = 0.0
+    }
+
     /** `target` is where the button says to go (0 or 1); `dt` in seconds. */
     fun update(target: Double, dt: Double): Double {
         value = if (target > value) minOf(target, value + rise * dt)

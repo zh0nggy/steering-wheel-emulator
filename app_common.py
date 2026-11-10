@@ -9,6 +9,7 @@ the frozen wire format is untouched.
 import json
 import math
 import os
+import re
 import sys
 import socket
 import struct
@@ -84,6 +85,50 @@ def pack_layout(boxes):
     rows = [[b["target"], round(b["x"], 4), round(b["y"], 4), round(b["w"], 4), round(b["h"], 4)]
             for b in boxes]
     return LAYOUT_MAGIC + json.dumps(rows, separators=(",", ":")).encode()
+
+
+# Phone-owned layout snapshots and Windows edits against a snapshot's revision.
+# A newer snapshot acknowledges an edit. Both sides repeat their latest message
+# over UDP so loss never requires stopping the controller stream.
+PHONE_LAYOUT_MAGIC = b"TWPHN2"
+WINDOWS_LAYOUT_MAGIC = b"TWPCV2"
+LAYOUT_CAPABILITY = b"TWLCAP"
+LAYOUT_PACKET_LIMIT = 4096
+
+
+def pack_windows_layout(snapshot):
+    session, revision, boxes = snapshot
+    rows = [[b[key] for key in ("target", "x", "y", "w", "h")] for b in boxes]
+    return WINDOWS_LAYOUT_MAGIC + f"{session}:{revision}:".encode() + json.dumps(rows, separators=(",", ":")).encode()
+
+
+def unpack_phone_layout(data, targets):
+    if not data.startswith(PHONE_LAYOUT_MAGIC) or len(data) > LAYOUT_PACKET_LIMIT:
+        return None
+    try:
+        session, rev, payload = data[len(PHONE_LAYOUT_MAGIC):].split(b":", 2)
+        if not re.fullmatch(rb"[a-f0-9]{32}", session) or not re.fullmatch(rb"[0-9]{1,19}", rev):
+            return None
+        revision = int(rev)
+        if revision > 2**63 - 1:
+            return None
+        rows = json.loads(payload)
+        if not isinstance(rows, list) or len(rows) > len(targets):
+            return None
+        boxes, seen = [], set()
+        for target, x, y, w, h in rows:
+            if not isinstance(target, str) or target not in targets or target in seen:
+                return None
+            if not all(type(v) in (int, float) and math.isfinite(v) for v in (x, y, w, h)):
+                return None
+            if not (0.01 <= w <= 1 and 0.01 <= h <= 1 and
+                    0 <= x and x + w <= 1.000001 and 0 <= y and y + h <= 1.000001):
+                return None
+            seen.add(target)
+            boxes.append(dict(target=target, x=min(x, 1 - w), y=min(y, 1 - h), w=w, h=h))
+        return session.decode("ascii"), revision, boxes
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        return None
 
 
 def ping_display(stats):

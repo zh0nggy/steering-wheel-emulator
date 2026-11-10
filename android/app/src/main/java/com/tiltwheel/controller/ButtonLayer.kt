@@ -11,7 +11,7 @@ import android.view.MotionEvent
 import android.view.View
 
 /**
- * Draws the receiver's Phone layout as touch buttons, each at the same place
+ * Draws the phone layout as touch buttons, each at the same place
  * and size (fractions of this view) as in the editor. A button is held while
  * any finger is on it, so several can be held at once, and sliding a finger
  * from one to another moves the press like on a real pad.
@@ -19,7 +19,7 @@ import android.view.View
  * onChange(buttons, rightTrigger, leftTrigger) fires whenever the held set
  * changes: buttons is the protocol bitmask, RT / LT are 0 or 1.
  */
-class ButtonLayer(
+open class ButtonLayer(
     context: Context,
     private val onChange: (Int, Double, Double) -> Unit,
 ) : View(context) {
@@ -28,9 +28,7 @@ class ButtonLayer(
         set(value) {
             if (value == field) return
             field = value
-            held.clear()
-            report()
-            invalidate()
+            release()
         }
 
     private val held = HashSet<Int>()   // indexes into boxes
@@ -47,13 +45,19 @@ class ButtonLayer(
     }
     private val rect = RectF()
 
-    private fun rectOf(box: Protocol.Box) = RectF(
+    protected fun rectOf(box: Protocol.Box) = RectF(
         (box.x * width).toFloat(), (box.y * height).toFloat(),
         ((box.x + box.w) * width).toFloat(), ((box.y + box.h) * height).toFloat())
 
     /** Topmost box under (x, y): later boxes are drawn on top, as in the editor. */
-    private fun hit(x: Float, y: Float): Int? =
+    protected fun hit(x: Float, y: Float): Int? =
         boxes.indices.lastOrNull { rectOf(boxes[it]).contains(x, y) }
+
+    fun release() {
+        held.clear()
+        report()
+        invalidate()
+    }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(event: MotionEvent): Boolean {

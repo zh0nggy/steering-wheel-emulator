@@ -48,15 +48,18 @@ Choose Android or Mac.
 1. On your phone, open the [latest release](https://github.com/zh0nggy/steering-wheel-emulator/releases/latest) and download `TiltWheel-<version>.apk`.
 2. Open the APK. If Android asks, allow your browser or file manager to **install unknown apps**, then complete the installation.
 3. Connect the phone to the same WiFi network as your PC and open **Tilt Wheel**.
-4. With the Windows receiver started and **Android** selected, tap your PC in the phone's list. If it does not appear, enter the IP address shown beside **This PC** in the receiver.
-5. Tap **Start sending**. Hold the phone in landscape in your neutral driving position and tap **Calibrate centre**.
-6. Turn the phone like a steering wheel. The receiver's status should turn green and its steering meter should move.
+4. On first launch, tap the buttons you want on the controller diagram, then tap **Next**. Drag controls to move them or select one and drag its corner to resize it. Tap **Save & continue** to save the layout on your phone. You can leave it empty for tilt steering alone.
+5. With the Windows receiver started and **Android** selected, tap your PC in the phone's list. If it does not appear, enter the IP address shown beside **This PC** in the receiver.
+6. Tap **Start sending**. Hold the phone in landscape in your neutral driving position and tap **Calibrate centre**.
+7. Turn the phone like a steering wheel. The receiver's status should turn green and its steering meter should move.
 
 Tap **Stop**, or use the back button, to return to the PC selection page.
 
-**Add touch buttons:** selecting **Android** in the receiver opens the Phone layout window. Click a button on the controller picture to add it to the phone drawing. Drag a box to move it, drag its corner to resize it, and right-click to remove it. Each button can be added once.
+**Edit touch buttons:** tap **Edit controls** from the connection or driving screen. While editing during a session, the phone stays connected and sends neutral controls. **Apply & return** saves the layout and resumes driving. Hold a control while driving to press it. **LT** and **RT** act as brake and throttle.
 
-While connected, layout edits appear on the phone within about a second. Hold a box to press that controller button. **LT** and **RT** boxes apply full brake and throttle.
+On Windows, selecting **Android** opens the Phone layout window. While connected it shows the phone's layout, and you can still add, move, resize, or right-click to remove buttons there. Windows edits sync to the phone. If both devices edit the same layout at once, saving on the phone takes priority. Use matching app versions for editing on both devices.
+
+To bring over an older Windows layout, copy `phone_layout.json` from beside the receiver app to the phone. Choose **Import layout** on the button selection screen and save it in the editor.
 
 ### MacBook
 

@@ -25,6 +25,7 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
+import org.json.JSONObject
 
 /** Colours matching the Mac sender in dark mode (app_common.Bar and friends). */
 object Theme {
@@ -39,23 +40,26 @@ object Theme {
     val BOX_LINE = Color.parseColor("#8fb4e8")
 }
 
-/**
- * Two pages:
- *  1. Connect: pick the Windows PC (found on the network, or type its IP) and
- *     tap Start sending, like the "Windows PC" box in the Mac app.
- *  2. Steering: tilt to steer, plus the touch buttons laid out in the
- *     receiver's Phone layout window (sent over the link). Stop goes back to 1.
- *
- * All steering tuning (deadzone, gamma, smoothing, invert) lives in the
- * receiver window, which also shows whether the phone is linked.
- */
+/** The same editor is available offline and during a driving session. */
 class MainActivity : Activity() {
+    private enum class Page { PICK, EDIT, CONNECT, DRIVE }
+    private var current = Page.PICK
     private lateinit var sensor: SteeringSensor
     private lateinit var sender: Sender
     private lateinit var discovery: Discovery
 
     private lateinit var connectPage: View
     private lateinit var steerPage: View
+    private lateinit var pickPage: View
+    private lateinit var editPage: View
+    private lateinit var picker: ControllerPicker
+    private lateinit var editor: LayoutEditor
+    private lateinit var pickedCount: TextView
+    private lateinit var importLayout: Button
+    private lateinit var removeControl: Button
+    private lateinit var applyLayout: Button
+    private lateinit var cancelLayout: Button
+    private lateinit var editorHint: TextView
     private lateinit var pcList: LinearLayout
     private lateinit var localNetworkButton: Button
     private lateinit var hostField: EditText
@@ -69,6 +73,8 @@ class MainActivity : Activity() {
     private var shownPcs: List<Discovery.Pc>? = null
     private var port = Protocol.DEFAULT_PORT
     private var resumed = false
+    private var savedLayout: List<Protocol.Box>? = null // null means setup has never been completed
+    private var draft: List<Protocol.Box> = emptyList()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -76,8 +82,27 @@ class MainActivity : Activity() {
         sensor = SteeringSensor(this)
         sender = Sender(sensor)
         discovery = Discovery(this)
+        savedLayout = prefs.getString("control_layout", null)?.let(ControlLayout::parseRows)
+        draft = savedInstanceState?.getString("draft")?.let(ControlLayout::parseRows)
+            ?: savedLayout.orEmpty()
         setContentView(buildLayout())
-        showPage(connect = true)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            onBackInvokedDispatcher.registerOnBackInvokedCallback(
+                android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,
+            ) { if (!handleBack()) finish() }
+        }
+        val restored = savedInstanceState?.getString("page")
+        showPage(when (restored) {
+            Page.PICK.name -> Page.PICK
+            Page.EDIT.name -> Page.EDIT
+            else -> if (savedLayout == null) Page.PICK else Page.CONNECT
+        })
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("page", current.name)
+        outState.putString("draft", ControlLayout.rows(draft))
+        super.onSaveInstanceState(outState)
     }
 
     override fun onResume() {
@@ -90,20 +115,30 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         resumed = false
-        // Leaving the app (call, home button) must never leave the car
-        // steering: stop() sends centred frames on the way out. You come back
-        // to the Connect page and tap Start sending again.
+        // Stop releases the pad. An unfinished edit stays open as an offline draft.
+        buttonLayer.release()
         sender.stop()
         sensor.stop()
         discovery.stop()
         ui.removeCallbacks(refresh)
-        showPage(connect = true)
+        if (current == Page.DRIVE) showPage(Page.CONNECT)
         super.onPause()
     }
 
-    @Deprecated("Back on the steering page means Stop, not leave the app.")
+    @Deprecated("Fallback for versions before the back dispatcher.")
     override fun onBackPressed() {
-        if (sender.isRunning) stopSending() else @Suppress("DEPRECATION") super.onBackPressed()
+        if (!handleBack()) @Suppress("DEPRECATION") super.onBackPressed()
+    }
+
+    private fun handleBack(): Boolean {
+        when (current) {
+            Page.DRIVE -> stopSending()
+            Page.EDIT -> showPage(Page.PICK)
+            Page.PICK -> if (sender.isRunning || savedLayout != null) finishEditing(false)
+                else return false
+            Page.CONNECT -> return false
+        }
+        return true
     }
 
     // --- layout ---
@@ -130,11 +165,15 @@ class MainActivity : Activity() {
     private fun buildLayout(): View {
         connectPage = buildConnectPage()
         steerPage = buildSteerPage()
+        pickPage = buildPickPage()
+        editPage = buildEditPage()
         val root = FrameLayout(this).apply {
             setBackgroundColor(Theme.BACKGROUND)
             setPadding(dp(24), dp(16), dp(24), dp(16))
             addView(connectPage)
             addView(steerPage)
+            addView(pickPage)
+            addView(editPage)
         }
         // Android 15+ draws apps under the status and navigation bars.
         // Pad by their size (and any camera cutout) so nothing is hidden.
@@ -180,17 +219,75 @@ class MainActivity : Activity() {
         ipRow.addView(button("Start sending") { startSending() })
         box.addView(ipRow)
         column.addView(box)
+        column.addView(button("Edit controls") { beginEditing() })
         return column
     }
 
-    /**
-     * Page 2: a slim strip on top (target, steering bar, Calibrate, Stop) and,
-     * filling the rest, the buttons from the receiver's Phone layout window.
-     */
+    private fun toolbar() = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+    private fun addToolbar(column: LinearLayout, strip: LinearLayout) {
+        column.addView(strip, LinearLayout.LayoutParams(-1, dp(52)))
+    }
+
+    private fun canvasArea(column: LinearLayout, view: View): FrameLayout {
+        val area = FrameLayout(this).apply {
+            setPadding(0, dp(6), 0, 0)
+            addView(view)
+        }
+        column.addView(area, LinearLayout.LayoutParams(-1, 0, 1f))
+        return area
+    }
+
+    private fun buildPickPage(): View {
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val strip = toolbar()
+        pickedCount = text("", 15f)
+        strip.addView(pickedCount, LinearLayout.LayoutParams(0, -2, 1f))
+        importLayout = button("Import layout") { chooseLayoutFile() }
+        strip.addView(importLayout)
+        strip.addView(button("Cancel") { finishEditing(false) }.apply { tag = "cancel_setup" })
+        strip.addView(button("Next") { showPage(Page.EDIT) })
+        addToolbar(column, strip)
+        picker = ControllerPicker(this) { target ->
+            draft = if (draft.any { it.target == target }) draft.filterNot { it.target == target }
+                else ControlLayout.add(draft, target)
+            updatePicker()
+        }
+        canvasArea(column, picker)
+        return column
+    }
+
+    private fun buildEditPage(): View {
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val strip = toolbar()
+        strip.addView(button("Back") { showPage(Page.PICK) })
+        editorHint = text("", 12f, Theme.MUTED)
+        strip.addView(editorHint, LinearLayout.LayoutParams(0, -2, 1f))
+        strip.addView(button("Reset") { editor.show(ControlLayout.reset(draft)) })
+        removeControl = button("Remove") { editor.removeSelected() }
+        strip.addView(removeControl)
+        cancelLayout = button("Cancel") { finishEditing(false) }
+        strip.addView(cancelLayout)
+        applyLayout = button("Save & continue") { finishEditing(true) }
+        strip.addView(applyLayout)
+        addToolbar(column, strip)
+        editor = LayoutEditor(this) { boxes, selected ->
+            draft = boxes
+            removeControl.isEnabled = selected != null
+            editorHint.text = when {
+                boxes.isEmpty() -> "No controls selected"
+                selected != null -> "Drag the corner to resize"
+                else -> "Drag a control to move it"
+            }
+        }.apply { setBackgroundColor(Theme.TROUGH) }
+        canvasArea(column, editor)
+        return column
+    }
+
     private fun buildSteerPage(): View {
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
 
-        val strip = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val strip = toolbar()
+        strip.addView(button("Edit controls") { beginEditing() })
         targetLabel = text("", 12f, Theme.MUTED)
         strip.addView(targetLabel)
         steerBar = Bar(this, Theme.STEER, centered = true).apply { contentDescription = "Steering" }
@@ -199,29 +296,116 @@ class MainActivity : Activity() {
         })
         strip.addView(button("Calibrate centre") { sensor.calibrate() })
         strip.addView(button("Stop") { stopSending() })
-        column.addView(strip)
+        addToolbar(column, strip)
 
-        val area = FrameLayout(this).apply { setPadding(0, dp(6), 0, 0) }
         buttonLayer = ButtonLayer(this) { mask, rt, lt ->
             sender.buttons = mask
             sender.rightTrigger = rt
             sender.leftTrigger = lt
         }
-        area.addView(buttonLayer)
-        emptyHint = text("Add buttons in the receiver's Phone layout window\n" +
-            "(click Android there). They appear here in a moment.", 13f, Theme.MUTED).apply {
+        val area = canvasArea(column, buttonLayer)
+        emptyHint = text("Tap Edit controls to add touch buttons.", 13f, Theme.MUTED).apply {
             gravity = Gravity.CENTER
             isClickable = false // touches go through to the buttons
         }
         area.addView(emptyHint, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT))
-        column.addView(area, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f))
         return column
     }
 
-    private fun showPage(connect: Boolean) {
-        connectPage.visibility = if (connect) View.VISIBLE else View.GONE
-        steerPage.visibility = if (connect) View.GONE else View.VISIBLE
+    private fun showPage(page: Page) {
+        current = page
+        sender.muted = page != Page.DRIVE
+        pickPage.visibility = if (page == Page.PICK) View.VISIBLE else View.GONE
+        editPage.visibility = if (page == Page.EDIT) View.VISIBLE else View.GONE
+        connectPage.visibility = if (page == Page.CONNECT) View.VISIBLE else View.GONE
+        steerPage.visibility = if (page == Page.DRIVE) View.VISIBLE else View.GONE
+        when (page) {
+            Page.PICK -> updatePicker()
+            Page.EDIT -> {
+                applyLayout.text = if (sender.isRunning) "Apply & return" else "Save & continue"
+                cancelLayout.visibility = if (savedLayout != null || sender.isRunning) View.VISIBLE else View.GONE
+                editor.show(draft)
+            }
+            Page.DRIVE -> {
+                buttonLayer.boxes = savedLayout.orEmpty()
+                emptyHint.visibility = if (buttonLayer.boxes.isEmpty()) View.VISIBLE else View.GONE
+            }
+            Page.CONNECT -> Unit
+        }
+        updateLocalNetworkAccess()
+    }
+
+    private fun updatePicker() {
+        picker.show(draft.map { it.target }.toSet())
+        pickedCount.text = "Choose buttons · ${draft.size} selected"
+        importLayout.visibility = if (sender.isRunning) View.GONE else View.VISIBLE
+        pickPage.findViewWithTag<View>("cancel_setup").visibility =
+            if (savedLayout != null || sender.isRunning) View.VISIBLE else View.GONE
+    }
+
+    private fun beginEditing() {
+        sender.muted = true
+        buttonLayer.release()
+        draft = savedLayout.orEmpty()
+        showPage(Page.PICK)
+    }
+
+    private fun storeLayout(boxes: List<Protocol.Box>) {
+        savedLayout = boxes
+        prefs.edit().putString("control_layout", ControlLayout.rows(boxes)).apply()
+        sender.publishLayout(boxes)
+        buttonLayer.boxes = boxes
+        emptyHint.visibility = if (boxes.isEmpty()) View.VISIBLE else View.GONE
+    }
+
+    private fun finishEditing(apply: Boolean) {
+        if (apply) storeLayout(draft)
+        showPage(if (sender.isRunning) Page.DRIVE else Page.CONNECT)
+    }
+
+    private fun chooseLayoutFile() {
+        @Suppress("DEPRECATION")
+        startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }, IMPORT_LAYOUT_REQUEST)
+    }
+
+    @Deprecated("Uses the framework document picker without AndroidX.")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        val uri = data?.data ?: return
+        if (requestCode != IMPORT_LAYOUT_REQUEST || resultCode != RESULT_OK) return
+        val boxes = runCatching {
+            val content = contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                val buffer = CharArray(1024)
+                val result = StringBuilder()
+                while (true) {
+                    val count = reader.read(buffer)
+                    if (count < 0) break
+                    require(result.length + count <= 16_384)
+                    result.append(buffer, 0, count)
+                }
+                result.toString()
+            } ?: error("No layout")
+            val rows = JSONObject(content).getJSONArray("boxes")
+            require(rows.length() <= ControlLayout.targets.size)
+            val parsed = (0 until rows.length()).map { i ->
+                val row = rows.getJSONObject(i)
+                val sized = row.has("w") && row.has("h")
+                val w = if (sized) row.getDouble("w") else 0.14
+                val h = if (sized) row.getDouble("h") else 0.18
+                Protocol.Box(row.getString("target"), row.getDouble("x") * (if (sized) 1.0 else 1 - w),
+                    row.getDouble("y") * (if (sized) 1.0 else 1 - h), w, h)
+            }
+            ControlLayout.parseRows(ControlLayout.rows(parsed)) ?: error("Invalid boxes")
+        }.getOrNull()
+        if (boxes == null) message("Couldn't import that file. Choose phone_layout.json from Tilt Wheel on Windows.")
+        else {
+            draft = boxes
+            showPage(Page.EDIT)
+        }
     }
 
     // --- behaviour ---
@@ -234,7 +418,7 @@ class MainActivity : Activity() {
         val allowed = hasLocalNetworkAccess()
         localNetworkButton.visibility = if (allowed) View.GONE else View.VISIBLE
         pcList.visibility = if (allowed) View.VISIBLE else View.GONE
-        if (allowed && resumed) discovery.start()
+        if (allowed && resumed && current == Page.CONNECT) discovery.start()
     }
 
     private fun requestLocalNetworkAccess() {
@@ -285,14 +469,15 @@ class MainActivity : Activity() {
         hostField.clearFocus()
         (getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager)
             .hideSoftInputFromWindow(hostField.windowToken, 0)
-        sender.start(host, port)
+        sender.start(host, port, savedLayout.orEmpty())
         targetLabel.text = "Sending to $host"
-        showPage(connect = false)
+        showPage(Page.DRIVE)
     }
 
     private fun stopSending() {
+        buttonLayer.release()
         sender.stop()
-        showPage(connect = true)
+        showPage(Page.CONNECT)
     }
 
     private fun message(value: String) {
@@ -326,7 +511,7 @@ class MainActivity : Activity() {
 
     private val refresh = object : Runnable {
         override fun run() {
-            if (connectPage.visibility == View.VISIBLE) {
+            if (current == Page.CONNECT) {
                 // Discovered PCs; fill in the only one automatically, like the Mac app.
                 val pcs = discovery.recent()
                 if (pcs.size == 1 && hostField.text.isBlank()) {
@@ -335,20 +520,24 @@ class MainActivity : Activity() {
                     shownPcs = null
                 }
                 if (pcs != shownPcs) showPcs(pcs)
-            } else if (!sender.isRunning) {
+            } else if (current == Page.DRIVE && !sender.isRunning) {
                 // The address couldn't be used (e.g. no network): back to page 1.
-                showPage(connect = true)
+                showPage(Page.CONNECT)
                 message("Couldn't send to that address. Check the IP and that both are on the same WiFi.")
             }
-            steerBar.value = sender.steer()
-            sender.layout?.let { buttonLayer.boxes = it }
-            emptyHint.visibility = if (buttonLayer.boxes.isEmpty()) View.VISIBLE else View.GONE
+            if (current == Page.DRIVE) {
+                steerBar.value = sender.steer()
+                sender.layoutProposal()?.let { storeLayout(it) }
+            } else if (current == Page.EDIT && !sender.isRunning) {
+                if (applyLayout.text != "Save & continue") applyLayout.text = "Save & continue"
+            }
             ui.postDelayed(this, 50)
         }
     }
 
     companion object {
         private const val LOCAL_NETWORK_REQUEST = 1
+        private const val IMPORT_LAYOUT_REQUEST = 2
 
         /** Port of mac_sender.is_private: true/false for an IPv4, null for a hostname. */
         fun isPrivate(host: String): Boolean? {

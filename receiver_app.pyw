@@ -81,6 +81,7 @@ class ReceiverEngine:
         self.error = None
         self.ping = app_common.RollingStats(1.0)  # round-trip ms to the Mac
         self._sender_addr = None
+        self.phone_layout_snapshot = None
         self._stop = threading.Event()
         self._thread = None
 
@@ -137,9 +138,21 @@ class ReceiverEngine:
             newest_seq = last_seq
             while True:
                 try:
-                    data, addr = sock.recvfrom(protocol.PACKET_SIZE * 4)
+                    data, addr = sock.recvfrom(app_common.LAYOUT_PACKET_LIMIT + 1)
                 except (BlockingIOError, ConnectionResetError):
                     break
+                except OSError as exc:
+                    if getattr(exc, "winerror", None) == 10040:  # oversized UDP datagram
+                        continue
+                    raise
+                if data.startswith(app_common.PHONE_LAYOUT_MAGIC):
+                    if cfg["layout"] is not None and addr == self._sender_addr == sender:
+                        snapshot = app_common.unpack_phone_layout(data, phone_layout.TARGET_NAMES)
+                        previous = self.phone_layout_snapshot
+                        if snapshot is not None and (previous is None or
+                                (snapshot[0] == previous[0] and snapshot[1] > previous[1])):
+                            self.phone_layout_snapshot = snapshot
+                    continue
                 sent_at = app_common.unpack_pong(data)
                 if sent_at is not None:
                     if 0.0 <= now - sent_at < 2.0:
@@ -163,6 +176,8 @@ class ReceiverEngine:
                             continue  # duplicate or older frame, even across wraparound
                     newest, sender, newest_seq = frame, addr, seq
             if newest is not None:
+                if sender != self._sender_addr:
+                    self.phone_layout_snapshot = None
                 self._sender_addr = sender
 
             # Our own ping to the Mac, ~10 per second, so this window can show
@@ -175,15 +190,26 @@ class ReceiverEngine:
                 except OSError:
                     pass
 
-            # The phone's on-screen buttons, from the Phone layout window.
-            # Android only; resent twice a second so edits (and a phone that
-            # just connected) catch up quickly. A lost packet is harmless.
+            # Current phones publish their own layout; send Windows edits only
+            # against the matching revision. Older phones still get TWLAYO.
             layout = cfg.get("layout")
             if (layout is not None and self._sender_addr is not None
                     and not failsafe.is_stale() and now >= next_layout):
                 next_layout = now + 0.5
+                snapshot = self.phone_layout_snapshot
+                proposal = cfg.get("layout_proposal")
+                reply = None
+                if snapshot is None:
+                    reply = app_common.pack_layout(layout)
+                elif proposal is not None and proposal[:2] == snapshot[:2]:
+                    reply = app_common.pack_windows_layout(proposal)
                 try:
-                    sock.sendto(app_common.pack_layout(layout), self._sender_addr)
+                    # A legacy receiver's buffer fits driving frames only.
+                    # Advertise support before a new phone sends a snapshot.
+                    if snapshot is None:
+                        sock.sendto(app_common.LAYOUT_CAPABILITY, self._sender_addr)
+                    if reply is not None:
+                        sock.sendto(reply, self._sender_addr)
                 except OSError:
                     pass
 
@@ -350,13 +376,14 @@ class ReceiverApp:
         if self._live_device == "android":
             root.after_idle(self.phone_layout.open)
 
-    def settings(self):
+    def settings(self, layout_proposal=None):
         return {"deadzone": self.deadzone.get(), "gamma": self.gamma.get(),
                 "smooth": self.smooth.get(), "invert": self.invert.get(),
                 "timeout": 0.25,
                 "range": max(10.0, self.range.get()) if self._live_device == "android" else None,
                 # Only the phone draws buttons; the Mac never gets layouts.
-                "layout": self.phone_layout.layout if self._live_device == "android" else None}
+                "layout": self.phone_layout.layout if self._live_device == "android" else None,
+                "layout_proposal": layout_proposal}
 
     def _debug_rows(self):
         """Rows for the Debug window: (name, value, what it means)."""
@@ -547,6 +574,9 @@ class ReceiverApp:
 
     def refresh(self):
         eng = self.engine
+        proposal = self.phone_layout.sync(
+            eng.phone_layout_snapshot if eng is not None and self._live_device == "android" else None
+        )
         if eng is not None:
             if eng.error:
                 error = eng.error
@@ -558,7 +588,7 @@ class ReceiverApp:
                     hint = "\n\nViGEmBus doesn't look installed. Reboot after installing it."
                 messagebox.showerror("Tilt Wheel", error + hint)
             else:
-                eng.settings = self.settings()
+                eng.settings = self.settings(proposal)
                 st = eng.status
                 for key, bar in self.bars.items():
                     bar.set(st[key])

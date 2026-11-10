@@ -8,7 +8,7 @@ right-click one to remove it.
 
 Positions and sizes are stored as fractions of the phone screen (0..1), so the
 layout fits any real phone size later. Saved to phone_layout.json next to this file.
-This only edits the layout; the phone app doesn't read it yet.
+While a phone is connected, this window also mirrors and edits its layout.
 """
 
 import json
@@ -214,6 +214,17 @@ class PhoneCanvas(tk.Canvas):
         self._update_hint()
         self._changed()
 
+    def replace_boxes(self, boxes):
+        """Mirror a phone snapshot without recording it as a Windows edit."""
+        for tag in list(self.boxes):
+            self.delete(tag)
+        self.boxes.clear()
+        self.items.clear()
+        self._drag = None
+        for b in boxes:
+            self._add(b["target"], b["x"], b["y"], b["w"], b["h"])
+        self._update_hint()
+
     def _start(self, tag, event, mode):
         self.tag_raise(tag)
         left, top, right, bottom = self._rect_px(self.boxes[tag])
@@ -264,6 +275,32 @@ class PhoneLayoutWindow:
         # Current layout, kept in memory so the receiver can send it to the
         # phone every refresh without reading the file each time.
         self.layout = load_layout()
+        self._basis = None
+        self._proposal = None
+
+    def sync(self, snapshot):
+        """Track the phone's revision and keep one Windows edit in flight.
+
+        If Windows changes again before acknowledgement, send that edit next.
+        A conflicting phone save wins over a Windows edit to the old revision.
+        """
+        if snapshot != self._basis:
+            if snapshot is not None:
+                session, revision, boxes = snapshot
+                acknowledged = (self._proposal is not None and
+                                self._proposal == (session, revision - 1, boxes))
+                if not acknowledged and self.layout != boxes:
+                    self.layout = boxes
+                    if self.phone is not None:
+                        self.phone.replace_boxes(boxes)
+                        self.controller._refresh_all()
+            self._basis = snapshot
+            self._proposal = None
+            if self.phone is not None:
+                self._update_status()
+        if snapshot is not None and self._proposal is None and self.layout != snapshot[2]:
+            self._proposal = (snapshot[0], snapshot[1], self.layout)
+        return self._proposal
 
     def open(self):
         if self.win is not None and self.win.winfo_exists():
@@ -338,7 +375,8 @@ class PhoneLayoutWindow:
 
     def _update_status(self, note=""):
         count = len(self.phone.boxes)
-        text = f"{count} box{'es' if count != 1 else ''} on the phone. Saved automatically."
+        status = "Linked to the phone." if self._basis is not None else "Saved automatically."
+        text = f"{count} box{'es' if count != 1 else ''} on the phone. {status}"
         self.status.config(text=f"{note}  {text}".strip())
 
     def close(self):

@@ -11,8 +11,8 @@ import java.net.SocketTimeoutException
  * the steering page). The packet is the full v3 frame, so the receiver needs
  * nothing new to drive the pad.
  *
- * The receiver also sends the button layout from its Phone layout window;
- * the newest one is in `layout` for the screen to draw.
+ * The phone publishes the current layout. Windows can propose an edit
+ * against that revision, which the activity accepts when it is not editing.
  *
  * +-FULL_SCALE_DEGREES of virtual steering goes out as +-1. The receiver
  * applies Range (Android tuning), deadzone, gamma, smoothing and invert.
@@ -29,6 +29,7 @@ class Sender(private val sensor: SteeringSensor) {
         // Trigger ramp, the same timings as the Mac (sender_app.py uses Ramp(0.35, 0.18)).
         const val RISE_SECONDS = 0.35   // 0 -> 100% while held
         const val FALL_SECONDS = 0.18   // 100% -> 0 after letting go
+        private val LAYOUT_CAPABILITY = "TWLCAP".toByteArray(Charsets.US_ASCII)
     }
 
     @Volatile var target: String? = null
@@ -39,9 +40,19 @@ class Sender(private val sensor: SteeringSensor) {
     @Volatile var rightTrigger = 0.0
     @Volatile var leftTrigger = 0.0
 
-    /** Newest layout from the receiver, or null until one arrives. */
-    @Volatile var layout: List<Protocol.Box>? = null
-        private set
+    @Volatile var muted = true
+    @Volatile private var layout: ControlLayout.Snapshot? = null
+    @Volatile private var proposal: ControlLayout.Snapshot? = null
+
+    fun publishLayout(boxes: List<Protocol.Box>) {
+        val previous = layout ?: return
+        layout = previous.copy(revision = previous.revision + 1, boxes = boxes)
+    }
+
+    fun layoutProposal(): List<Protocol.Box>? {
+        val current = layout ?: return null
+        return proposal?.takeIf { it.session == current.session && it.revision == current.revision }?.boxes
+    }
 
     @Volatile private var running = false
     private var thread: Thread? = null
@@ -51,9 +62,10 @@ class Sender(private val sensor: SteeringSensor) {
     /** -1 full left .. +1 full right. */
     fun steer() = Protocol.clamp(sensor.offset() / FULL_SCALE_DEGREES, -1.0, 1.0)
 
-    fun start(host: String, port: Int) {
+    fun start(host: String, port: Int, boxes: List<Protocol.Box>) {
         stop()
         sensor.resetAcceleration()
+        layout = ControlLayout.Snapshot(ControlLayout.newSession(), 0, boxes)
         target = host
         running = true
         thread = Thread({ run(host, port) }, "sender").apply {
@@ -68,6 +80,8 @@ class Sender(private val sensor: SteeringSensor) {
         thread?.join(1000)
         thread = null
         target = null
+        layout = null
+        proposal = null
     }
 
     private fun run(host: String, port: Int) {
@@ -78,6 +92,7 @@ class Sender(private val sensor: SteeringSensor) {
             socket = DatagramSocket().apply {
                 trafficClass = 0xB8 // DSCP EF, same "voice" class as app_common.low_latency_socket
                 soTimeout = 1       // receive() doubles as the loop's 1 ms sleep
+                connect(address, port)
             }
         } catch (_: Exception) {
             running = false
@@ -97,6 +112,10 @@ class Sender(private val sensor: SteeringSensor) {
         var seq = 0
         var lastSend = 0.0
         var lastFrame: List<Long>? = null
+        var sentLayout: ControlLayout.Snapshot? = null
+        var layoutBytes: ByteArray? = null
+        var nextLayout = 0.0
+        var layoutSupported = false
         // Big enough for a layout of every button (about 40 bytes each).
         val buf = ByteArray(4096)
         // Same pedal feel as the Mac (key_input.Ramp): the touch buttons are on/off,
@@ -109,10 +128,15 @@ class Sender(private val sensor: SteeringSensor) {
             val now = monotonicSeconds()
             val dt = now - prevLoop
             prevLoop = now
-            val steer = steer()
-            val rt = rtRamp.update(rightTrigger, dt)
-            val lt = ltRamp.update(leftTrigger, dt)
-            val mask = buttons
+            val neutral = muted
+            if (neutral) {
+                rtRamp.reset()
+                ltRamp.reset()
+            }
+            val steer = if (neutral) 0.0 else steer()
+            val rt = if (neutral) 0.0 else rtRamp.update(rightTrigger, dt)
+            val lt = if (neutral) 0.0 else ltRamp.update(leftTrigger, dt)
+            val mask = if (neutral) 0 else buttons
             val frame = listOf(Math.round(steer * 1e4), Math.round(rt * 1e3), Math.round(lt * 1e3), mask.toLong())
             val since = now - lastSend
             val pressChanged = lastFrame == null || lastFrame[3] != frame[3]
@@ -121,7 +145,20 @@ class Sender(private val sensor: SteeringSensor) {
                 lastSend = now
                 lastFrame = frame
             }
-            readReplies(socket, buf)
+            val snapshot = layout
+            if (layoutSupported && snapshot != null && (sentLayout !== snapshot || now >= nextLayout)) {
+                if (sentLayout !== snapshot) {
+                    layoutBytes = ControlLayout.pack(ControlLayout.PHONE, snapshot)
+                    sentLayout = snapshot
+                }
+                layoutBytes?.let {
+                    try {
+                        socket.send(DatagramPacket(it, it.size, address, port))
+                    } catch (_: Exception) {}
+                }
+                nextLayout = now + 0.25
+            }
+            if (readReplies(socket, buf)) layoutSupported = true
         }
 
         // Centre the car and release every button so nothing stays held.
@@ -133,28 +170,40 @@ class Sender(private val sensor: SteeringSensor) {
     }
 
     /**
-     * Bounce the receiver's PINGs back so its window can show a ping, and keep
-     * the newest layout. Its echoes of our own timestamps are read and dropped:
+     * Bounce the receiver's PINGs back and keep pending Windows layout edits.
+     * Its echoes of our own timestamps are read and dropped:
      * the phone doesn't show a ping, but draining them keeps the buffer empty.
      */
-    private fun readReplies(socket: DatagramSocket, buf: ByteArray) {
-        while (true) {
+    private fun readReplies(socket: DatagramSocket, buf: ByteArray): Boolean {
+        var layoutSupported = false
+        repeat(32) {
             val packet = DatagramPacket(buf, buf.size)
             try {
                 socket.receive(packet)
             } catch (_: SocketTimeoutException) {
-                return
+                return layoutSupported
             } catch (_: Exception) {
-                return
+                return layoutSupported
             }
-            Protocol.parseLayout(packet.data, packet.length)?.let {
-                if (it != layout) layout = it
-                continue
+            if (packet.length == LAYOUT_CAPABILITY.size &&
+                LAYOUT_CAPABILITY.indices.all { buf[it] == LAYOUT_CAPABILITY[it] }
+            ) {
+                layoutSupported = true
+                return@repeat
             }
-            val pong = Protocol.pingToPong(packet.data, packet.length) ?: continue
+            if (packet.length > Protocol.ECHO_SIZE) {
+                val edit = ControlLayout.unpack(ControlLayout.WINDOWS, packet.data, packet.length)
+                val current = layout
+                if (edit != null && current != null && edit.session == current.session &&
+                    edit.revision == current.revision
+                ) proposal = edit
+                return@repeat
+            }
+            val pong = Protocol.pingToPong(packet.data, packet.length) ?: return@repeat
             try {
                 socket.send(DatagramPacket(pong, pong.size, packet.socketAddress))
             } catch (_: Exception) {}
         }
+        return layoutSupported
     }
 }
