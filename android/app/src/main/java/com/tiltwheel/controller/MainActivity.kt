@@ -296,6 +296,9 @@ class MainActivity : Activity() {
             syncTuning()
         }
         canvasArea(column, tuningPanel)
+        column.addView(text(getString(R.string.tuning_autosave_note), 12f, Theme.MUTED).apply {
+            setPadding(dp(8), dp(8), dp(8), 0)
+        }, LinearLayout.LayoutParams(-1, -2))
         return column
     }
 

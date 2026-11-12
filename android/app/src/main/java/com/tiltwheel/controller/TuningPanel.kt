@@ -34,13 +34,15 @@ class TuningPanel @JvmOverloads constructor(
 
     init {
         isFillViewport = true
+        // Keep the scrollbar in its own gutter, clear of the numeric values.
+        scrollBarStyle = View.SCROLLBARS_OUTSIDE_INSET
+        setPadding(0, 0, dp(8), 0)
+        clipToPadding = true
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(8), dp(4), dp(8), dp(8))
         }
         addView(column, LayoutParams(-1, -2))
-        column.addView(label("Changes are saved automatically and apply live when connected.", Theme.MUTED)
-            .apply { setPadding(0, 0, 0, dp(8)) })
         val decimal: (Int) -> String = { String.format(Locale.US, "%.2f", it / 100.0) }
         slider(column, "Range (deg)", 10, 90, 1, { it.range }, { t, v -> t.copy(range = v) })
         slider(column, "Deadzone", 0, 30, 1, { it.deadzone }, { t, v -> t.copy(deadzone = v) }, decimal)
@@ -53,6 +55,8 @@ class TuningPanel @JvmOverloads constructor(
             box.text = title
             box.textSize = 14f
             box.setTextColor(Theme.TEXT)
+            box.setButtonDrawable(R.drawable.tuning_checkbox)
+            box.buttonTintList = null // Preserve the white checkmark on devices with custom themes.
             box.minHeight = dp(48)
             toggles.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
         }
