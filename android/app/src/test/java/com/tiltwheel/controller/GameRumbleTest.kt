@@ -218,8 +218,40 @@ class GameRumbleTest {
         rumble.test()
         assertEquals(1, output.previews.size)
         assertEquals(0, output.starts.size)
-        assertTrue(watchdog.tasks.isEmpty())
         rumble.setActive(true)
         assertEquals(1, output.cancellations)
+    }
+
+    @Test fun previewSurvivesConnectedSenderTicksAndStopsAfterOneSecond() {
+        rumble.setActive(false)
+        rumble.test()
+        for (step in 1..9) {
+            watchdog.advanceTo(1.0 + step * 0.1)
+            rumble.tick()
+        }
+        assertEquals(1, output.previews.size)
+        assertTrue(output.starts.isEmpty())
+        assertEquals(0, output.cancellations)
+        watchdog.advanceTo(2.001)
+        assertEquals(1, output.cancellations)
+        rumble.tick()
+        assertEquals(1, output.cancellations)
+    }
+
+    @Test fun previewUsesCurrentBoostAndRespectsGameRumbleToggle() {
+        rumble.setActive(false)
+        rumble.setBoost(100)
+        rumble.test()
+        assertEquals(listOf(RumbleStrength.amplitude(RumbleMotors(160, 100), 100)), output.previews)
+        rumble.setBoost(250)
+        assertEquals(1, output.cancellations)
+        rumble.test()
+        assertEquals(RumbleStrength.amplitude(RumbleMotors(160, 100), 250), output.previews.last())
+        rumble.setEnabled(false)
+        assertEquals(2, output.cancellations)
+        rumble.test()
+        assertEquals(2, output.previews.size)
+        watchdog.advanceTo(3.0)
+        assertEquals(2, output.cancellations)
     }
 }

@@ -25,6 +25,7 @@ class GameRumble internal constructor(
     private var enabled = true
     private var active = false
     private var playing = false
+    private var previewUntil = Double.NEGATIVE_INFINITY
     private var closed = false
     private var boost = RumbleStrength.DEFAULT_BOOST
     private var cancelTimeout: (() -> Unit)? = null
@@ -61,13 +62,16 @@ class GameRumble internal constructor(
         if (state.motors(now).silent) {
             cancel() // Game stops bypass filtering, even if tick() is delayed.
         } else {
-            armTimeout(now)
+            // Delayed feedback keeps the expiry from its echoed phone timestamp.
+            armTimeout(state.remainingMillis(now))
         }
     }
 
     @Synchronized fun tick() {
         if (closed) return
         val now = clock()
+        // The connected sender still ticks while editing; let a local test finish.
+        if (!active && enabled && isSupported && now < previewUntil) return
         val motors = if (enabled && active) state.motors(now) else RumbleMotors()
         if (motors.silent || !isSupported) {
             cancel()
@@ -87,15 +91,16 @@ class GameRumble internal constructor(
             val amplitude = if (amplitudeControl) RumbleStrength.amplitude(RumbleMotors(160, 100), boost) else -1
             output.preview(amplitude)
             playing = true
+            previewUntil = clock() + 1.0
+            armTimeout(1000)
         }
     }
 
-    private fun armTimeout(now: Double) {
+    private fun armTimeout(delayMillis: Long) {
         cancelTimeout?.invoke()
         val generation = ++timeoutGeneration
-        // Use the echoed phone timestamp, so a delayed packet doesn't gain a
-        // fresh 250 ms. This runs on a separate thread if sending/ticking stalls.
-        cancelTimeout = watchdog.schedule(state.remainingMillis(now)) {
+        // This runs on a separate thread if sending/ticking stalls.
+        cancelTimeout = watchdog.schedule(delayMillis) {
             synchronized(this) {
                 // A cancelled callback may already have started. It must not
                 // cancel an effect renewed by a more recent feedback packet.
@@ -110,6 +115,7 @@ class GameRumble internal constructor(
         cancelTimeout = null
         if (playing) output.cancel()
         playing = false
+        previewUntil = Double.NEGATIVE_INFINITY
         playback.reset()
     }
 

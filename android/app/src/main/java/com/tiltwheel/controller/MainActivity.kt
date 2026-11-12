@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager.PERMISSION_DENIED
 import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.graphics.Color
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
@@ -16,6 +17,12 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.InputType
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.TextUtils
+import android.text.style.AbsoluteSizeSpan
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
 import android.view.Gravity
 import android.view.View
 import android.view.WindowInsets
@@ -55,6 +62,7 @@ class MainActivity : Activity() {
     private lateinit var editPage: View
     private lateinit var tuningPage: View
     private lateinit var tuningPanel: TuningPanel
+    private lateinit var testRumbleButton: Button
     private var persistedTuning: TuningSync.State? = null
     private lateinit var picker: ControllerPicker
     private lateinit var editor: LayoutEditor
@@ -88,7 +96,10 @@ class MainActivity : Activity() {
             Tuning.decode(prefs.getString("android_tuning", null)) ?: Tuning(),
             prefs.getBoolean("android_tuning_pending", false),
         ))
-        persistedTuning = sender.tuning.state()
+        val initialTuning = sender.tuning.state()
+        persistedTuning = initialTuning
+        rumble.setEnabled(initialTuning.tuning.gameRumble)
+        rumble.setBoost(initialTuning.tuning.rumbleBoost)
         discovery = Discovery(this)
         savedLayout = prefs.getString("control_layout", null)?.let(ControlLayout::parseRows)
         draft = savedInstanceState?.getString("draft")?.let(ControlLayout::parseRows)
@@ -272,13 +283,28 @@ class MainActivity : Activity() {
     private fun buildTuningPage(): View {
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val strip = toolbar()
-        strip.addView(text("Tuning", 15f), LinearLayout.LayoutParams(-2, -2))
-        strip.addView(text(getString(R.string.tuning_autosave_note), 12f, Theme.MUTED),
+        val heading = SpannableStringBuilder(getString(R.string.tuning_title)).apply {
+            setSpan(StyleSpan(Typeface.BOLD), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            append("  ")
+            val noteStart = length
+            append(getString(R.string.tuning_autosave_note))
+            setSpan(AbsoluteSizeSpan(12, true), noteStart, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            setSpan(ForegroundColorSpan(Theme.MUTED), noteStart, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        strip.addView(text("", 22f).apply {
+            text = heading
+            setSingleLine()
+            ellipsize = TextUtils.TruncateAt.END
+        },
             LinearLayout.LayoutParams(0, -2, 1f).apply {
-                marginStart = dp(12)
                 marginEnd = dp(8)
             })
-        strip.addView(button("Done") { finishEditing(true) }.apply { tag = "tuning_done" },
+        testRumbleButton = button(getString(R.string.test_rumble)) { rumble.test() }.apply {
+            isEnabled = rumble.isSupported && sender.tuning.state().tuning.gameRumble
+        }
+        strip.addView(testRumbleButton,
+            LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+        strip.addView(button("Cancel") { finishEditing(false) },
             LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
         strip.addView(button("Next") { showPage(Page.PICK) })
         column.addView(strip, LinearLayout.LayoutParams(-1, dp(48)))
@@ -396,8 +422,6 @@ class MainActivity : Activity() {
         when (page) {
             Page.TUNE -> {
                 tuningPanel.show(sender.tuning.state().tuning)
-                tuningPage.findViewWithTag<View>("tuning_done").visibility =
-                    if (savedLayout != null || sender.isRunning) View.VISIBLE else View.GONE
             }
             Page.PICK -> updatePicker()
             Page.EDIT -> {
@@ -431,11 +455,19 @@ class MainActivity : Activity() {
 
     private fun syncTuning() {
         val state = sender.tuning.state()
-        if (state == persistedTuning) return
+        val previous = persistedTuning
+        if (state == previous) return
         persistedTuning = state
         prefs.edit().putString("android_tuning", state.tuning.encode())
             .putBoolean("android_tuning_pending", state.pending).apply()
         tuningPanel.show(state.tuning)
+        if (state.tuning.gameRumble != previous?.tuning?.gameRumble) {
+            rumble.setEnabled(state.tuning.gameRumble)
+        }
+        if (state.tuning.rumbleBoost != previous?.tuning?.rumbleBoost) {
+            rumble.setBoost(state.tuning.rumbleBoost)
+        }
+        testRumbleButton.isEnabled = rumble.isSupported && state.tuning.gameRumble
     }
 
     private fun storeLayout(boxes: List<Protocol.Box>) {
