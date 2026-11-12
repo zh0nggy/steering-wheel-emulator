@@ -286,19 +286,21 @@ class MainActivity : Activity() {
     private fun buildTuningPage(): View {
         val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
         val strip = toolbar()
-        strip.addView(text("Tuning for Android", 15f), LinearLayout.LayoutParams(0, -2, 1f))
+        strip.addView(text("Tuning", 15f), LinearLayout.LayoutParams(-2, -2))
+        strip.addView(text(getString(R.string.tuning_autosave_note), 12f, Theme.MUTED),
+            LinearLayout.LayoutParams(0, -2, 1f).apply {
+                marginStart = dp(12)
+                marginEnd = dp(8)
+            })
         strip.addView(button("Done") { finishEditing(true) }.apply { tag = "tuning_done" },
             LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
         strip.addView(button("Next") { showPage(Page.PICK) })
-        addToolbar(column, strip)
+        column.addView(strip, LinearLayout.LayoutParams(-1, dp(48)))
         tuningPanel = TuningPanel(this) { value ->
             sender.tuning.edit(value)
             syncTuning()
         }
-        canvasArea(column, tuningPanel)
-        column.addView(text(getString(R.string.tuning_autosave_note), 12f, Theme.MUTED).apply {
-            setPadding(dp(8), dp(8), dp(8), 0)
-        }, LinearLayout.LayoutParams(-1, -2))
+        canvasArea(column, tuningPanel).setPadding(0, 0, 0, 0)
         return column
     }
 

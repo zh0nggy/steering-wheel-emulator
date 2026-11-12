@@ -40,7 +40,7 @@ class TuningPanel @JvmOverloads constructor(
         clipToPadding = true
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(4), dp(8), dp(8))
+            setPadding(dp(8), 0, dp(8), dp(8))
         }
         addView(column, LayoutParams(-1, -2))
         val decimal: (Int) -> String = { String.format(Locale.US, "%.2f", it / 100.0) }
