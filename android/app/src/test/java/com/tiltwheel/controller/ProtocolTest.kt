@@ -54,6 +54,20 @@ class ProtocolTest {
     }
 
     @Test
+    fun tunedRumbleMatchesPythonAndRejectsInvalidBoost() {
+        // protocol.pack_rumble(200, 32, 0xfffffffe, 1234.5, 250)
+        val data = hex("5457524d4232fffffffe40934a0000000000c820fa")
+        assertEquals(Protocol.Rumble(-2, 1234.5, 200, 32, 250), Protocol.unpackRumble(data, data.size))
+        assertNull(Protocol.unpackRumble(data, data.size - 1))
+        assertNull(Protocol.unpackRumble(data.copyOf(5), Protocol.RUMBLE_TUNING_SIZE))
+        assertNull(Protocol.unpackRumble(data + byteArrayOf(0), data.size + 1))
+        for (invalidBoost in listOf(0, 99, 251, 255)) {
+            data[data.lastIndex] = invalidBoost.toByte()
+            assertNull(Protocol.unpackRumble(data, data.size))
+        }
+    }
+
+    @Test
     fun layoutFromPython() {
         // app_common.pack_layout([...A, DPAD_UP, RT...])
         val data = """TWLAYO[["A",0.1,0.25,0.14,0.18],["DPAD_UP",0.0,0.82,0.3,0.18],["RT",0.86,0.0,0.14,1.0]]"""

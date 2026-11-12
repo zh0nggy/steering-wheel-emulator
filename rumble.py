@@ -34,9 +34,11 @@ class RumbleRelay:
         with self._lock:
             self._motors = (large_motor, small_motor)
 
-    def tick(self, sock, addr, frame, now):
+    def tick(self, sock, addr, frame, now, *, enabled=True, boost=None, test_until=0.0):
         """Called by the receiver loop, only while the sender is linked."""
-        if not self._registered or addr is None or frame is None:
+        # Windows tuning can send a test even in dry run or if subscribing to
+        # game feedback failed. The CLI keeps its original untuned behavior.
+        if (not self._registered and boost is None) or addr is None or frame is None:
             return
         if addr != self._peer:
             self._peer = addr
@@ -48,17 +50,22 @@ class RumbleRelay:
             return
         with self._lock:
             motors = self._motors
+        if not enabled:
+            motors = (0, 0)
+        elif now < test_until:
+            motors = (160, 100)
+        feedback = (*motors, boost)
         elapsed = now - self._sent_at
-        if motors == self._last_sent and elapsed < self.KEEPALIVE:
+        if feedback == self._last_sent and elapsed < self.KEEPALIVE:
             return
         if motors != (0, 0) and elapsed < self.MIN_INTERVAL:
             return
         try:
-            sock.sendto(protocol.pack_rumble(*motors, frame["seq"], frame["timestamp"]), addr)
+            sock.sendto(protocol.pack_rumble(*motors, frame["seq"], frame["timestamp"], boost), addr)
         except OSError:
             return  # Retry on the next loop; the phone expires old feedback.
         self._last_seq = frame["seq"]
-        self._last_sent = motors
+        self._last_sent = feedback
         self._sent_at = now
 
     def close(self):

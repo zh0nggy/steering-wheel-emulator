@@ -193,6 +193,26 @@ class GameRumbleTest {
         assertEquals(1, fixed.cancellations)
     }
 
+    @Test fun windowsBoostAppliesLiveAndOldPacketsCannotOverwriteIt() {
+        rumble.receive(Protocol.Rumble(1, 1.0, 20, 0, 100))
+        rumble.tick()
+        watchdog.advanceTo(1.05)
+        rumble.receive(Protocol.Rumble(2, 1.05, 20, 0, 250))
+        rumble.tick()
+        assertEquals(listOf(
+            RumbleStrength.amplitude(RumbleMotors(20, 0), 100),
+            RumbleStrength.amplitude(RumbleMotors(20, 0), 250),
+        ), output.starts)
+        // A reordered settings update must neither reset nor replace the new boost.
+        rumble.receive(Protocol.Rumble(1, 1.0, 20, 0, 100))
+        watchdog.advanceTo(1.10)
+        rumble.tick()
+        assertEquals(2, output.starts.size)
+        assertEquals(0, output.cancellations)
+        watchdog.advanceTo(1.301)
+        assertEquals(1, output.cancellations)
+    }
+
     @Test fun previewIsOneFiniteEffectAndStopsWhenLeavingTheScreen() {
         rumble.setActive(false)
         rumble.test()

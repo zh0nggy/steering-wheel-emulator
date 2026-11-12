@@ -44,7 +44,9 @@ SETTINGS_FILE = os.path.join(app_common.app_dir(),
 # laptop want different deadzone / curve / smoothing. The switch at the top of
 # the window picks which set is live; each is saved on its own.
 DEVICES = (("mac", "Mac"), ("android", "Android"))
-TUNING_DEFAULTS = {"range": 45.0, "deadzone": 0.05, "gamma": 1.5, "smooth": 0.0, "invert": False}
+TUNING_DEFAULTS = {"range": 45.0, "deadzone": 0.05, "gamma": 1.5, "smooth": 0.0,
+                   "invert": False, "game_rumble": True,
+                   "rumble_boost": protocol.RUMBLE_DEFAULT_BOOST}
 # The phone sends raw rotation (+-PHONE_FULL_SCALE deg = +-1) and this window's
 # Range sets full lock. The Mac applies its own Range slider before sending,
 # so Range here is Android only (hidden on Mac) and nothing stacks.
@@ -81,6 +83,7 @@ class ReceiverEngine:
                        "linked": False, "sender": None}
         self.error = None
         self.rumble_error = None
+        self.rumble_test_until = 0.0
         self.ping = app_common.RollingStats(1.0)  # round-trip ms to the Mac
         self._sender_addr = None
         self.phone_layout_snapshot = None
@@ -255,7 +258,13 @@ class ReceiverEngine:
                 pad.update()
 
             if not stale and cfg.get("layout") is not None:
-                rumble.tick(sock, self._sender_addr, feedback_frame, now)
+                if not cfg.get("game_rumble", True):
+                    self.rumble_test_until = 0.0
+                rumble.tick(sock, self._sender_addr, feedback_frame, now,
+                            enabled=cfg.get("game_rumble", True),
+                            boost=cfg.get("rumble_boost"), test_until=self.rumble_test_until)
+            else:
+                self.rumble_test_until = 0.0
 
             st.update(steer=steer, throttle=throttle, brake=brake, frames=received,
                       dropped=dropped, presses=buttons.presses,
@@ -305,6 +314,8 @@ class ReceiverApp:
         self.gamma = tk.DoubleVar(value=TUNING_DEFAULTS["gamma"])
         self.smooth = tk.DoubleVar(value=TUNING_DEFAULTS["smooth"])
         self.invert = tk.BooleanVar(value=TUNING_DEFAULTS["invert"])
+        self.game_rumble = tk.BooleanVar(value=TUNING_DEFAULTS["game_rumble"])
+        self.rumble_boost = tk.IntVar(value=TUNING_DEFAULTS["rumble_boost"])
         self.device = tk.StringVar(value="mac")
         self.profiles = {key: dict(TUNING_DEFAULTS) for key, _ in DEVICES}
         self.dry_run = tk.BooleanVar(value=vg is None)
@@ -370,7 +381,16 @@ class ReceiverApp:
         app_common.labeled_scale(tuning, 3, "Smoothing", self.smooth, 0.0, 0.9, 0.05)
         tk.Checkbutton(tuning, text="Invert steering", variable=self.invert).grid(
             row=4, column=0, columnspan=2, sticky="w")
-        self._show_range()
+        rumble_row = tk.Frame(tuning)
+        rumble_row.grid(row=5, column=0, columnspan=3, sticky="we", pady=(6, 0))
+        tk.Checkbutton(rumble_row, text="Game rumble", variable=self.game_rumble).pack(side="left")
+        self.rumble_test_btn = tk.Button(rumble_row, text="Test rumble", command=self.test_rumble)
+        self.rumble_test_btn.pack(side="right")
+        app_common.labeled_scale(tuning, 6, "Rumble boost (%)", self.rumble_boost,
+                                 protocol.RUMBLE_MIN_BOOST, protocol.RUMBLE_MAX_BOOST, 1)
+        self.rumble_widgets = [rumble_row, *tuning.grid_slaves(row=6)]
+        self.rumble_boost_scale = next(w for w in tuning.grid_slaves(row=6) if isinstance(w, tk.Scale))
+        self._show_android_tuning()
 
         self.hint = tk.Label(root, anchor="w", justify="left", fg=app_common.muted(root),
                              wraplength=380, text=self._hint_text())
@@ -391,6 +411,7 @@ class ReceiverApp:
     def settings(self, layout_proposal=None):
         return {"deadzone": self.deadzone.get(), "gamma": self.gamma.get(),
                 "smooth": self.smooth.get(), "invert": self.invert.get(),
+                "game_rumble": self.game_rumble.get(), "rumble_boost": self.rumble_boost.get(),
                 "timeout": 0.25,
                 "range": max(10.0, self.range.get()) if self._live_device == "android" else None,
                 # Only the phone draws buttons; the Mac never gets layouts.
@@ -410,7 +431,7 @@ class ReceiverApp:
         return [
             ("linked", "yes" if st["linked"] else "no", "receiving packets right now"),
             ("rumble", eng.rumble_error or ("available" if eng.pad is not None else "dry run"),
-             "game feedback sent to Android; enable rumble in the game and phone app"),
+             "enable Game rumble in Android tuning and vibration in the game"),
             ("from", st["sender"] or "--", "the sending device's address"),
             ("steer", f"{st['steer']:+.3f}", "after deadzone / gamma, sent to the pad"),
             ("held", " ".join(st["held"]) or "-", "pad buttons held right now"),
@@ -462,7 +483,9 @@ class ReceiverApp:
         try:
             self.profiles[device] = {"range": self.range.get(),
                                      "deadzone": self.deadzone.get(), "gamma": self.gamma.get(),
-                                     "smooth": self.smooth.get(), "invert": self.invert.get()}
+                                     "smooth": self.smooth.get(), "invert": self.invert.get(),
+                                     "game_rumble": self.game_rumble.get(),
+                                     "rumble_boost": self.rumble_boost.get()}
         except tk.TclError:
             pass
 
@@ -474,10 +497,13 @@ class ReceiverApp:
         self.gamma.set(profile["gamma"])
         self.smooth.set(profile["smooth"])
         self.invert.set(profile["invert"])
+        self.game_rumble.set(profile["game_rumble"])
+        self.rumble_boost.set(int(protocol.clamp(profile["rumble_boost"],
+                                               protocol.RUMBLE_MIN_BOOST, protocol.RUMBLE_MAX_BOOST)))
 
-    def _show_range(self):
-        """Range row on Android only: the Mac sets its Range in the sender app."""
-        for widget in self.range_row:
+    def _show_android_tuning(self):
+        """Range and phone rumble belong to the Android tuning profile."""
+        for widget in [*self.range_row, *self.rumble_widgets]:
             if self._live_device == "android":
                 widget.grid()
             else:
@@ -504,7 +530,7 @@ class ReceiverApp:
         self._live_device = new
         self._apply_profile(new)
         self.tuning.config(text=self._tuning_title())
-        self._show_range()
+        self._show_android_tuning()
         self.hint.config(text=self._hint_text())
         self.save_settings()
         # Android: open the editor for where the phone's on-screen controls go.
@@ -512,6 +538,12 @@ class ReceiverApp:
             self.phone_layout.open()
         else:
             self.phone_layout.close()
+
+    def test_rumble(self):
+        """Preview on the connected phone, through the receiver thread's socket."""
+        if (self._live_device == "android" and self.game_rumble.get()
+                and self.engine is not None and self.engine.status["linked"]):
+            self.engine.rumble_test_until = time.monotonic() + 1.0
 
     def toggle(self):
         if self.engine is not None:
@@ -588,6 +620,11 @@ class ReceiverApp:
 
     def refresh(self):
         eng = self.engine
+        rumble_enabled = self.game_rumble.get()
+        self.rumble_boost_scale.config(state="normal" if rumble_enabled else "disabled")
+        can_test = (rumble_enabled and self._live_device == "android" and eng is not None
+                    and eng.status["linked"] and self.fake is None)
+        self.rumble_test_btn.config(state="normal" if can_test else "disabled")
         proposal = self.phone_layout.sync(
             eng.phone_layout_snapshot if eng is not None and self._live_device == "android" else None
         )

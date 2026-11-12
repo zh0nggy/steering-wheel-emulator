@@ -125,7 +125,9 @@ If the sender stops or the connection is lost, the receiver centres steering and
 
 ### Android game rumble
 
-The phone can vibrate in response to the game's Xbox controller rumble. Update both the Windows receiver and Android app to a version with rumble support, select **Android** on the receiver, and leave **Dry run** unchecked. Enable vibration in the game's controller settings and leave **Game rumble** checked on the phone's connection screen. **Test rumble** plays one second of steady vibration without needing a game or PC connection. **Rumble boost** lifts quieter game feedback; start at the default 150% and adjust for your phone.
+The phone can vibrate in response to the game's Xbox controller rumble. Update both the Windows receiver and Android app together, select **Android** on the receiver, and leave **Dry run** unchecked for game feedback. Enable vibration in the game's controller settings and leave **Game rumble** checked in Windows' **Tuning for Android** panel. **Rumble boost (%)** lifts quieter game feedback; start at the default 150% and adjust for your phone. These settings apply live and are saved with the Android tuning profile. The phone no longer has separate rumble settings.
+
+To try it, start the Windows receiver, tap **Start sending** on the phone, and click **Test rumble** in Windows. It plays one second of steady vibration on the connected phone, then resumes any game feedback. The test also works in **Dry run**, without a game or virtual controller. Unchecking **Game rumble** stops both test and game vibration.
 
 The receiver sends both game motor strengths back over the existing WiFi connection. On phones with amplitude control, the app combines both motor strengths into a continuous vibration level and boosts quieter feedback. Steady rumble stays running through small fluctuations and keepalive packets; significant strength changes update it, and game stop commands cancel it immediately. This approximates Xbox rumble on a single phone actuator; it cannot reproduce two separate motors or frequencies the phone does not expose. Phones without amplitude control use their default vibration strength. Rumble stops when you stop sending, edit controls, or switch away from the app. A separate timeout also cancels it after about a quarter of a second without fresh feedback, even if the sender loop stalls. Games must produce Xbox controller rumble; wheel-only force feedback is not converted.
 
@@ -142,6 +144,8 @@ The receiver saves separate tuning profiles for Mac and Android. Choose the devi
 | Gamma | Receiver | Values above 1 give finer control near centre. |
 | Smoothing | Receiver | Adds smoothing. Leave at 0 unless steering is jittery. |
 | Invert | Sender or receiver | Reverses steering direction. |
+| Game rumble | Receiver for Android | Enables phone vibration from game feedback. |
+| Rumble boost (%) | Receiver for Android | Lifts quieter vibration; 100–250%, with 150% as the default. |
 
 The **Ping** display shows average round-trip time, with the maximum in brackets. Under 10 ms is a good target. If latency or packet loss is high, try a less busy WiFi network or connect your sender to the PC's Mobile Hotspot.
 

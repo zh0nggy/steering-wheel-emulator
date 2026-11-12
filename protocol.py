@@ -30,6 +30,14 @@ PACKET_SIZE = _PACKET.size
 RUMBLE_MAGIC = b"TWRMB1"
 _RUMBLE = struct.Struct("!6sIdBB")
 RUMBLE_SIZE = _RUMBLE.size
+# Tuned feedback carries the Windows boost alongside the motor strengths, so
+# UDP loss/reordering cannot apply settings to the wrong feedback frame.
+RUMBLE_TUNING_MAGIC = b"TWRMB2"
+_RUMBLE_TUNING = struct.Struct("!6sIdBBB")
+RUMBLE_TUNING_SIZE = _RUMBLE_TUNING.size
+RUMBLE_MIN_BOOST = 100
+RUMBLE_MAX_BOOST = 250
+RUMBLE_DEFAULT_BOOST = 150
 
 # Bit order of the `buttons` field. Names match pad_mapping / vgamepad.
 BUTTONS = (
@@ -92,14 +100,23 @@ def unpack(data):
     }
 
 
-def pack_rumble(large_motor, small_motor, seq, timestamp):
+def pack_rumble(large_motor, small_motor, seq, timestamp, boost=None):
     """Game motor strengths (0..255), acknowledging a recent control frame."""
-    return _RUMBLE.pack(RUMBLE_MAGIC, seq & 0xFFFFFFFF, timestamp,
-                        clamp(int(large_motor), 0, 255),
-                        clamp(int(small_motor), 0, 255))
+    values = (seq & 0xFFFFFFFF, timestamp, clamp(int(large_motor), 0, 255),
+              clamp(int(small_motor), 0, 255))
+    if boost is not None:
+        return _RUMBLE_TUNING.pack(RUMBLE_TUNING_MAGIC, *values,
+                                  clamp(int(boost), RUMBLE_MIN_BOOST, RUMBLE_MAX_BOOST))
+    return _RUMBLE.pack(RUMBLE_MAGIC, *values)
 
 
 def unpack_rumble(data):
+    if len(data) == RUMBLE_TUNING_SIZE:
+        magic, seq, timestamp, large, small, boost = _RUMBLE_TUNING.unpack(data)
+        if magic != RUMBLE_TUNING_MAGIC or not RUMBLE_MIN_BOOST <= boost <= RUMBLE_MAX_BOOST:
+            return None
+        return {"seq": seq, "timestamp": timestamp,
+                "large_motor": large, "small_motor": small, "boost": boost}
     if len(data) != RUMBLE_SIZE:
         return None
     magic, seq, timestamp, large, small = _RUMBLE.unpack(data)

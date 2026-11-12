@@ -55,6 +55,9 @@ class GameRumble internal constructor(
         if (closed || !enabled || !active || !isSupported) return
         val now = clock()
         if (!state.accept(frame, now)) return
+        // Settings travel with accepted feedback, so an old packet cannot
+        // overwrite the Windows slider. Updating boost must not reset its lease.
+        boost = frame.boost.coerceIn(RumbleStrength.MIN_BOOST, RumbleStrength.MAX_BOOST)
         if (state.motors(now).silent) {
             cancel() // Game stops bypass filtering, even if tick() is delayed.
         } else {
