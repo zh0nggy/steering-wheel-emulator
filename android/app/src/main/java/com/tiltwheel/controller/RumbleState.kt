@@ -32,10 +32,13 @@ class RumbleState {
     }
 
     fun amplitude(now: Double): Int {
-        val frame = latest ?: return 0
-        if (remainingMillis(now) == 0L) return 0
-        // A phone usually has one actuator. Preserve either controller motor's
-        // feedback without adding the strengths and clipping most effects.
-        return maxOf(frame.largeMotor, frame.smallMotor).coerceIn(0, 255)
+        val motors = motors(now)
+        return maxOf(motors.large, motors.small)
+    }
+
+    fun motors(now: Double): RumbleMotors {
+        val frame = latest ?: return RumbleMotors()
+        if (remainingMillis(now) == 0L) return RumbleMotors()
+        return RumbleMotors(frame.largeMotor.coerceIn(0, 255), frame.smallMotor.coerceIn(0, 255))
     }
 }

@@ -25,6 +25,7 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.SeekBar
 import android.widget.TextView
 
 /** Colours matching the Mac sender in dark mode (app_common.Bar and friends). */
@@ -82,6 +83,7 @@ class MainActivity : Activity() {
         sensor = SteeringSensor(this)
         rumble = GameRumble(this)
         rumble.setEnabled(prefs.getBoolean("game_rumble", true))
+        rumble.setBoost(prefs.getInt("rumble_boost", RumbleStrength.DEFAULT_BOOST))
         sender = Sender(sensor, rumble)
         discovery = Discovery(this)
         savedLayout = prefs.getString("control_layout", null)?.let(ControlLayout::parseRows)
@@ -125,6 +127,11 @@ class MainActivity : Activity() {
         ui.removeCallbacks(refresh)
         if (current == Page.DRIVE) showPage(Page.CONNECT)
         super.onPause()
+    }
+
+    override fun onDestroy() {
+        rumble.close()
+        super.onDestroy()
     }
 
     @Deprecated("Fallback for versions before the back dispatcher.")
@@ -230,22 +237,50 @@ class MainActivity : Activity() {
         box.addView(ipRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         column.addView(box)
         val rumbleRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
-        val testRumble = button("Test vibration") { rumble.test() }.apply {
+        val testRumble = button("Test rumble") { rumble.test() }.apply {
             isEnabled = rumble.isSupported && prefs.getBoolean("game_rumble", true)
         }
-        rumbleRow.addView(CheckBox(this).apply {
+        val gameRumbleToggle = CheckBox(this).apply {
             text = if (rumble.isSupported) "Game rumble" else "Game rumble (unavailable)"
             setTextColor(Theme.TEXT)
             isChecked = prefs.getBoolean("game_rumble", true)
             isEnabled = rumble.isSupported
-            setOnCheckedChangeListener { _, checked ->
-                rumble.setEnabled(checked)
-                prefs.edit().putBoolean("game_rumble", checked).apply()
-                testRumble.isEnabled = rumble.isSupported && checked
-            }
-        }, LinearLayout.LayoutParams(0, -2, 1f))
+        }
+        rumbleRow.addView(gameRumbleToggle, LinearLayout.LayoutParams(0, -2, 1f))
         rumbleRow.addView(testRumble)
         column.addView(rumbleRow)
+        val boost = prefs.getInt("rumble_boost", RumbleStrength.DEFAULT_BOOST)
+            .coerceIn(RumbleStrength.MIN_BOOST, RumbleStrength.MAX_BOOST)
+        val strengthLabel = text("Rumble boost: $boost%", 13f, Theme.MUTED)
+        val strengthSlider = SeekBar(this).apply {
+            max = RumbleStrength.MAX_BOOST - RumbleStrength.MIN_BOOST
+            progress = boost - RumbleStrength.MIN_BOOST
+            isEnabled = rumble.isSupported && rumble.amplitudeControl && prefs.getBoolean("game_rumble", true)
+            contentDescription = "Rumble boost"
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                    val value = progress + RumbleStrength.MIN_BOOST
+                    strengthLabel.text = "Rumble boost: $value%"
+                    if (fromUser) {
+                        rumble.setBoost(value)
+                        prefs.edit().putInt("rumble_boost", value).apply()
+                    }
+                }
+                override fun onStartTrackingTouch(bar: SeekBar) {}
+                override fun onStopTrackingTouch(bar: SeekBar) {}
+            })
+        }
+        gameRumbleToggle.setOnCheckedChangeListener { _, checked ->
+            rumble.setEnabled(checked)
+            prefs.edit().putBoolean("game_rumble", checked).apply()
+            testRumble.isEnabled = rumble.isSupported && checked
+            strengthSlider.isEnabled = rumble.isSupported && rumble.amplitudeControl && checked
+        }
+        column.addView(LinearLayout(this).apply {
+            gravity = Gravity.CENTER_VERTICAL
+            addView(strengthLabel)
+            addView(strengthSlider, LinearLayout.LayoutParams(0, dp(32), 1f).apply { marginStart = dp(12) })
+        })
         column.addView(
             button("Edit controls") { beginEditing() },
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) },
