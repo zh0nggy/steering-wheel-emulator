@@ -17,6 +17,7 @@ import time
 
 import pad_mapping
 import protocol
+from rumble import RumbleRelay
 
 try:
     import vgamepad as vg
@@ -148,6 +149,10 @@ def main():
     shifts = 0
     last_seq = -1
     last_report = time.monotonic()
+    rumble = RumbleRelay(pad)
+    feedback_frame = sender_addr = None
+    if rumble.error:
+        print(f"rumble unavailable: {rumble.error}")
 
     print(f"listening on UDP {args.port}  (dry_run={args.dry_run})")
     print("ctrl-c to stop")
@@ -159,14 +164,16 @@ def main():
             newest = None
             while True:
                 try:
-                    data, _ = sock.recvfrom(protocol.PACKET_SIZE * 4)
+                    data, addr = sock.recvfrom(protocol.PACKET_SIZE * 4)
                 except BlockingIOError:
                     break
                 frame = protocol.unpack(data)
                 if frame is not None:
                     newest = frame
+                    sender_addr = addr
 
             if newest is not None:
+                feedback_frame = newest
                 received += 1
                 if last_seq >= 0 and newest["seq"] > last_seq + 1:
                     dropped += newest["seq"] - last_seq - 1
@@ -183,7 +190,8 @@ def main():
                 brake = newest["left_trigger"]
                 mask = newest["buttons"]
 
-            if failsafe.is_stale():
+            stale = failsafe.is_stale()
+            if stale:
                 steer = throttle = brake = 0.0
                 mask = 0  # release everything if the link drops
             buttons.update(pad, mask)
@@ -194,6 +202,8 @@ def main():
                 pad.update()
 
             now = time.monotonic()
+            if not stale:
+                rumble.tick(sock, sender_addr, feedback_frame, now)
             if now - last_report >= 1.0:
                 print(
                     f"  steer={steer:+.3f} thr={throttle:.2f} brk={brake:.2f} "
@@ -205,6 +215,7 @@ def main():
     except KeyboardInterrupt:
         print("\nstopped")
     finally:
+        rumble.close()
         if pad is not None:
             pad.reset()
             pad.update()

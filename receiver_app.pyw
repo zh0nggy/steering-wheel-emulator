@@ -29,6 +29,7 @@ import mock_sender
 import pad_mapping
 import phone_layout
 import protocol
+from rumble import RumbleRelay
 from pad_receiver import Failsafe, shape
 
 try:
@@ -79,6 +80,7 @@ class ReceiverEngine:
                        "frames": 0, "dropped": 0, "presses": 0, "held": (),
                        "linked": False, "sender": None}
         self.error = None
+        self.rumble_error = None
         self.ping = app_common.RollingStats(1.0)  # round-trip ms to the Mac
         self._sender_addr = None
         self.phone_layout_snapshot = None
@@ -97,16 +99,21 @@ class ReceiverEngine:
     def _run(self):
         pad = self.pad
         sock = beacon = None
+        rumble = None
         try:
             sock = app_common.low_latency_socket()
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(("0.0.0.0", self.port))
             sock.setblocking(False)
             beacon = app_common.BeaconSender(self.port)
-            self._loop(pad, sock, beacon)
+            rumble = RumbleRelay(pad)
+            self.rumble_error = rumble.error
+            self._loop(pad, sock, beacon, rumble)
         except Exception as exc:
             self.error = f"{type(exc).__name__}: {exc}"
         finally:
+            if rumble is not None:
+                rumble.close()
             if pad is not None:
                 pad.reset()   # centred and released, but still plugged in
                 pad.update()
@@ -115,7 +122,7 @@ class ReceiverEngine:
             if beacon is not None:
                 beacon.close()
 
-    def _loop(self, pad, sock, beacon):
+    def _loop(self, pad, sock, beacon, rumble):
         buttons = pad_mapping.ButtonState(resolve_button)
         failsafe = Failsafe(self.settings["timeout"])
 
@@ -123,6 +130,7 @@ class ReceiverEngine:
         mask = 0
         received = dropped = 0
         last_seq = None
+        feedback_frame = None
         next_ping = next_layout = 0.0
         st = self.status
 
@@ -215,6 +223,7 @@ class ReceiverEngine:
 
             if newest is not None:
                 received += 1
+                feedback_frame = newest
                 if last_seq is not None:
                     dropped += ((newest_seq - last_seq) & 0xFFFFFFFF) - 1
                 last_seq = newest_seq
@@ -244,6 +253,9 @@ class ReceiverEngine:
             if pad is not None:
                 pad_mapping.apply(pad, steer, throttle, brake)
                 pad.update()
+
+            if not stale and cfg.get("layout") is not None:
+                rumble.tick(sock, self._sender_addr, feedback_frame, now)
 
             st.update(steer=steer, throttle=throttle, brake=brake, frames=received,
                       dropped=dropped, presses=buttons.presses,
@@ -397,6 +409,8 @@ class ReceiverApp:
         rtt = eng.ping.summary()
         return [
             ("linked", "yes" if st["linked"] else "no", "receiving packets right now"),
+            ("rumble", eng.rumble_error or ("available" if eng.pad is not None else "dry run"),
+             "game feedback sent to Android; enable rumble in the game and phone app"),
             ("from", st["sender"] or "--", "the sending device's address"),
             ("steer", f"{st['steer']:+.3f}", "after deadzone / gamma, sent to the pad"),
             ("held", " ".join(st["held"]) or "-", "pad buttons held right now"),

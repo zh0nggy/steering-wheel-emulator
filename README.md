@@ -123,6 +123,12 @@ Bindings and sender settings are saved beside the Mac scripts in `sender_setting
 
 If the sender stops or the connection is lost, the receiver centres steering and releases pedals and buttons after about a quarter of a second.
 
+### Android game rumble
+
+The phone can vibrate in response to the game's Xbox controller rumble. Update both the Windows receiver and Android app to a version with rumble support, select **Android** on the receiver, and leave **Dry run** unchecked. Enable vibration in the game's controller settings and leave **Game rumble** checked on the phone's connection screen. **Test vibration** checks the phone's motor without needing a game or PC connection.
+
+The receiver sends the game's two motor strengths back over the existing WiFi connection. The phone uses the stronger value for its vibrator, so the feel depends on the phone and will differ from a controller with two separate motors. Phones without amplitude control use their default vibration strength. Rumble stops when you stop sending, edit controls, switch away from the app, or stop receiving fresh feedback for about a quarter of a second. Games must produce Xbox controller rumble; wheel-only force feedback is not converted.
+
 ## Tuning
 
 The receiver saves separate tuning profiles for Mac and Android. Choose the device beside **This PC** to adjust its profile.

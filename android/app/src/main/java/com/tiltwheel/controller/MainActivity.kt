@@ -21,6 +21,7 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -45,6 +46,7 @@ class MainActivity : Activity() {
     private var current = Page.PICK
     private lateinit var sensor: SteeringSensor
     private lateinit var sender: Sender
+    private lateinit var rumble: GameRumble
     private lateinit var discovery: Discovery
 
     private lateinit var connectPage: View
@@ -78,7 +80,9 @@ class MainActivity : Activity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         sensor = SteeringSensor(this)
-        sender = Sender(sensor)
+        rumble = GameRumble(this)
+        rumble.setEnabled(prefs.getBoolean("game_rumble", true))
+        sender = Sender(sensor, rumble)
         discovery = Discovery(this)
         savedLayout = prefs.getString("control_layout", null)?.let(ControlLayout::parseRows)
         draft = savedInstanceState?.getString("draft")?.let(ControlLayout::parseRows)
@@ -225,6 +229,23 @@ class MainActivity : Activity() {
         )
         box.addView(ipRow, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
         column.addView(box)
+        val rumbleRow = LinearLayout(this).apply { gravity = Gravity.CENTER_VERTICAL }
+        val testRumble = button("Test vibration") { rumble.test() }.apply {
+            isEnabled = rumble.isSupported && prefs.getBoolean("game_rumble", true)
+        }
+        rumbleRow.addView(CheckBox(this).apply {
+            text = if (rumble.isSupported) "Game rumble" else "Game rumble (unavailable)"
+            setTextColor(Theme.TEXT)
+            isChecked = prefs.getBoolean("game_rumble", true)
+            isEnabled = rumble.isSupported
+            setOnCheckedChangeListener { _, checked ->
+                rumble.setEnabled(checked)
+                prefs.edit().putBoolean("game_rumble", checked).apply()
+                testRumble.isEnabled = rumble.isSupported && checked
+            }
+        }, LinearLayout.LayoutParams(0, -2, 1f))
+        rumbleRow.addView(testRumble)
+        column.addView(rumbleRow)
         column.addView(
             button("Edit controls") { beginEditing() },
             LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) },
@@ -341,6 +362,7 @@ class MainActivity : Activity() {
     private fun showPage(page: Page) {
         current = page
         sender.muted = page != Page.DRIVE
+        rumble.setActive(page == Page.DRIVE)
         pickPage.visibility = if (page == Page.PICK) View.VISIBLE else View.GONE
         editPage.visibility = if (page == Page.EDIT) View.VISIBLE else View.GONE
         connectPage.visibility = if (page == Page.CONNECT) View.VISIBLE else View.GONE
@@ -370,6 +392,7 @@ class MainActivity : Activity() {
 
     private fun beginEditing() {
         sender.muted = true
+        rumble.setActive(false)
         buttonLayer.release()
         draft = savedLayout.orEmpty()
         showPage(Page.PICK)

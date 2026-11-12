@@ -21,7 +21,7 @@ import java.net.SocketTimeoutException
  * once), and at least every KEEPALIVE so the receiver's failsafe never fires
  * while you hold still.
  */
-class Sender(private val sensor: SteeringSensor) {
+class Sender(private val sensor: SteeringSensor, private val rumble: GameRumble) {
     companion object {
         const val MAX_RATE = 250.0      // packets/sec ceiling
         const val KEEPALIVE = 0.01      // always send at least every 10 ms
@@ -77,6 +77,7 @@ class Sender(private val sensor: SteeringSensor) {
     /** Stops sending; the loop centres the car and releases everything on the way out. */
     fun stop() {
         running = false
+        rumble.setActive(false)
         thread?.join(1000)
         thread = null
         target = null
@@ -124,53 +125,59 @@ class Sender(private val sensor: SteeringSensor) {
         val ltRamp = Ramp(RISE_SECONDS, FALL_SECONDS)
         var prevLoop = monotonicSeconds()
 
-        while (running) {
-            val now = monotonicSeconds()
-            val dt = now - prevLoop
-            prevLoop = now
-            val neutral = muted
-            if (neutral) {
-                rtRamp.reset()
-                ltRamp.reset()
-            }
-            val steer = if (neutral) 0.0 else steer()
-            val rt = if (neutral) 0.0 else rtRamp.update(rightTrigger, dt)
-            val lt = if (neutral) 0.0 else ltRamp.update(leftTrigger, dt)
-            val mask = if (neutral) 0 else buttons
-            val frame = listOf(Math.round(steer * 1e4), Math.round(rt * 1e3), Math.round(lt * 1e3), mask.toLong())
-            val since = now - lastSend
-            val pressChanged = lastFrame == null || lastFrame[3] != frame[3]
-            if (pressChanged || (frame != lastFrame && since >= 1.0 / MAX_RATE) || since >= KEEPALIVE) {
-                send(steer, rt, lt, mask, seq++)
-                lastSend = now
-                lastFrame = frame
-            }
-            val snapshot = layout
-            if (layoutSupported && snapshot != null && (sentLayout !== snapshot || now >= nextLayout)) {
-                if (sentLayout !== snapshot) {
-                    layoutBytes = ControlLayout.pack(ControlLayout.PHONE, snapshot)
-                    sentLayout = snapshot
+        try {
+            while (running) {
+                val now = monotonicSeconds()
+                val dt = now - prevLoop
+                prevLoop = now
+                val neutral = muted
+                if (neutral) {
+                    rtRamp.reset()
+                    ltRamp.reset()
                 }
-                layoutBytes?.let {
-                    try {
-                        socket.send(DatagramPacket(it, it.size, address, port))
-                    } catch (_: Exception) {}
+                val steer = if (neutral) 0.0 else steer()
+                val rt = if (neutral) 0.0 else rtRamp.update(rightTrigger, dt)
+                val lt = if (neutral) 0.0 else ltRamp.update(leftTrigger, dt)
+                val mask = if (neutral) 0 else buttons
+                val frame = listOf(Math.round(steer * 1e4), Math.round(rt * 1e3), Math.round(lt * 1e3), mask.toLong())
+                val since = now - lastSend
+                val pressChanged = lastFrame == null || lastFrame[3] != frame[3]
+                if (pressChanged || (frame != lastFrame && since >= 1.0 / MAX_RATE) || since >= KEEPALIVE) {
+                    send(steer, rt, lt, mask, seq++)
+                    lastSend = now
+                    lastFrame = frame
                 }
-                nextLayout = now + 0.25
+                val snapshot = layout
+                if (layoutSupported && snapshot != null && (sentLayout !== snapshot || now >= nextLayout)) {
+                    if (sentLayout !== snapshot) {
+                        layoutBytes = ControlLayout.pack(ControlLayout.PHONE, snapshot)
+                        sentLayout = snapshot
+                    }
+                    layoutBytes?.let {
+                        try {
+                            socket.send(DatagramPacket(it, it.size, address, port))
+                        } catch (_: Exception) {}
+                    }
+                    nextLayout = now + 0.25
+                }
+                if (readReplies(socket, buf)) layoutSupported = true
+                rumble.tick()
             }
-            if (readReplies(socket, buf)) layoutSupported = true
-        }
 
-        // Centre the car and release every button so nothing stays held.
-        repeat(10) {
-            send(0.0, 0.0, 0.0, 0, seq++)
-            Thread.sleep(10)
+            // Centre the car and release every button so nothing stays held.
+            repeat(10) {
+                send(0.0, 0.0, 0.0, 0, seq++)
+                Thread.sleep(10)
+            }
+        } finally {
+            rumble.reset()
+            socket.close()
+            running = false
         }
-        socket.close()
     }
 
     /**
-     * Bounce the receiver's PINGs back and keep pending Windows layout edits.
+     * Receive game rumble, bounce PINGs back and keep pending Windows layout edits.
      * Its echoes of our own timestamps are read and dropped:
      * the phone doesn't show a ping, but draining them keeps the buffer empty.
      */
@@ -184,6 +191,10 @@ class Sender(private val sensor: SteeringSensor) {
                 return layoutSupported
             } catch (_: Exception) {
                 return layoutSupported
+            }
+            Protocol.unpackRumble(packet.data, packet.length)?.let {
+                rumble.receive(it)
+                return@repeat
             }
             if (packet.length == LAYOUT_CAPABILITY.size &&
                 LAYOUT_CAPABILITY.indices.all { buf[it] == LAYOUT_CAPABILITY[it] }

@@ -86,6 +86,19 @@ object Protocol {
     fun unpackEcho(data: ByteArray, length: Int): Double? =
         if (hasMagic(data, length, ECHO_MAGIC)) ByteBuffer.wrap(data, 6, 8).double else null
 
+    // Optional game feedback: protocol.py struct "!6sIdBB". The timestamp and
+    // sequence are echoed from our input, not from the PC's clock.
+    const val RUMBLE_SIZE = 6 + 4 + 8 + 1 + 1
+    private val RUMBLE_MAGIC = "TWRMB1".toByteArray(Charsets.US_ASCII)
+    data class Rumble(val seq: Int, val timestamp: Double, val largeMotor: Int, val smallMotor: Int)
+
+    fun unpackRumble(data: ByteArray, length: Int): Rumble? {
+        if (length != RUMBLE_SIZE || length > data.size) return null
+        if (RUMBLE_MAGIC.indices.any { data[it] != RUMBLE_MAGIC[it] }) return null
+        val buf = ByteBuffer.wrap(data, 6, RUMBLE_SIZE - 6).order(ByteOrder.BIG_ENDIAN)
+        return Rumble(buf.int, buf.double, buf.get().toInt() and 0xFF, buf.get().toInt() and 0xFF)
+    }
+
     // --- app_common.py: phone layout, "TWLAYO" + JSON [[target, x, y, w, h], ...] ---
 
     /** One on-screen button. x, y = top-left, w, h = size; fractions of the screen. */

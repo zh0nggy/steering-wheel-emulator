@@ -24,6 +24,13 @@ DEFAULT_PORT = 5005
 _PACKET = struct.Struct("!BdfffIH")
 PACKET_SIZE = _PACKET.size
 
+# Optional Windows -> Android feedback. This does not change the v3 input frame;
+# older senders simply ignore it. Echo the phone's sequence and timestamp so it
+# can reject reordered or delayed feedback using its own clock.
+RUMBLE_MAGIC = b"TWRMB1"
+_RUMBLE = struct.Struct("!6sIdBB")
+RUMBLE_SIZE = _RUMBLE.size
+
 # Bit order of the `buttons` field. Names match pad_mapping / vgamepad.
 BUTTONS = (
     "A", "B", "X", "Y",
@@ -83,3 +90,20 @@ def unpack(data):
         "seq": seq,
         "buttons": buttons,
     }
+
+
+def pack_rumble(large_motor, small_motor, seq, timestamp):
+    """Game motor strengths (0..255), acknowledging a recent control frame."""
+    return _RUMBLE.pack(RUMBLE_MAGIC, seq & 0xFFFFFFFF, timestamp,
+                        clamp(int(large_motor), 0, 255),
+                        clamp(int(small_motor), 0, 255))
+
+
+def unpack_rumble(data):
+    if len(data) != RUMBLE_SIZE:
+        return None
+    magic, seq, timestamp, large, small = _RUMBLE.unpack(data)
+    if magic != RUMBLE_MAGIC:
+        return None
+    return {"seq": seq, "timestamp": timestamp,
+            "large_motor": large, "small_motor": small}
