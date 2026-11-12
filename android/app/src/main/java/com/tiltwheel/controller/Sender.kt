@@ -13,6 +13,7 @@ import java.net.SocketTimeoutException
  *
  * The phone publishes the current layout. Windows can propose an edit
  * against that revision, which the activity accepts when it is not editing.
+ * A separate acknowledged channel mirrors the Windows Android tuning profile.
  *
  * +-FULL_SCALE_DEGREES of virtual steering goes out as +-1. The receiver
  * applies Range (Android tuning), deadzone, gamma, smoothing and invert.
@@ -21,7 +22,11 @@ import java.net.SocketTimeoutException
  * once), and at least every KEEPALIVE so the receiver's failsafe never fires
  * while you hold still.
  */
-class Sender(private val sensor: SteeringSensor, private val rumble: GameRumble) {
+class Sender(
+    private val sensor: SteeringSensor,
+    private val rumble: GameRumble,
+    val tuning: TuningSync,
+) {
     companion object {
         const val MAX_RATE = 250.0      // packets/sec ceiling
         const val KEEPALIVE = 0.01      // always send at least every 10 ms
@@ -66,6 +71,7 @@ class Sender(private val sensor: SteeringSensor, private val rumble: GameRumble)
         stop()
         sensor.resetAcceleration()
         layout = ControlLayout.Snapshot(ControlLayout.newSession(), 0, boxes)
+        tuning.connect()
         target = host
         running = true
         thread = Thread({ run(host, port) }, "sender").apply {
@@ -83,6 +89,7 @@ class Sender(private val sensor: SteeringSensor, private val rumble: GameRumble)
         target = null
         layout = null
         proposal = null
+        tuning.disconnect()
     }
 
     private fun run(host: String, port: Int) {
@@ -116,6 +123,7 @@ class Sender(private val sensor: SteeringSensor, private val rumble: GameRumble)
         var sentLayout: ControlLayout.Snapshot? = null
         var layoutBytes: ByteArray? = null
         var nextLayout = 0.0
+        var nextTuning = 0.0
         var layoutSupported = false
         // Big enough for a layout of every button (about 40 bytes each).
         val buf = ByteArray(4096)
@@ -160,6 +168,14 @@ class Sender(private val sensor: SteeringSensor, private val rumble: GameRumble)
                     }
                     nextLayout = now + 0.25
                 }
+                if (now >= nextTuning) {
+                    tuning.packet()?.let {
+                        try {
+                            socket.send(DatagramPacket(it, it.size, address, port))
+                        } catch (_: Exception) {}
+                    }
+                    nextTuning = now + 0.1
+                }
                 if (readReplies(socket, buf)) layoutSupported = true
                 rumble.tick()
             }
@@ -196,6 +212,7 @@ class Sender(private val sensor: SteeringSensor, private val rumble: GameRumble)
                 rumble.receive(it)
                 return@repeat
             }
+            if (tuning.receive(packet.data, packet.length)) return@repeat
             if (packet.length == LAYOUT_CAPABILITY.size &&
                 LAYOUT_CAPABILITY.indices.all { buf[it] == LAYOUT_CAPABILITY[it] }
             ) {

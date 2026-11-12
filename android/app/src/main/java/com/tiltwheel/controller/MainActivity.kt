@@ -1,9 +1,11 @@
 package com.tiltwheel.controller
 
 import android.Manifest.permission.ACCESS_LOCAL_NETWORK
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
+import android.content.res.ColorStateList
 import android.content.pm.PackageManager.PERMISSION_DENIED
 import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.graphics.Color
@@ -41,8 +43,8 @@ object Theme {
 
 /** The same editor is available offline and during a driving session. */
 class MainActivity : Activity() {
-    private enum class Page { PICK, EDIT, CONNECT, DRIVE }
-    private var current = Page.PICK
+    private enum class Page { TUNE, PICK, EDIT, CONNECT, DRIVE }
+    private var current = Page.TUNE
     private lateinit var sensor: SteeringSensor
     private lateinit var sender: Sender
     private lateinit var rumble: GameRumble
@@ -52,6 +54,11 @@ class MainActivity : Activity() {
     private lateinit var steerPage: View
     private lateinit var pickPage: View
     private lateinit var editPage: View
+    private lateinit var tuningPage: View
+    private lateinit var tuningPanel: TuningPanel
+    private lateinit var editTabs: LinearLayout
+    private val tabButtons = LinkedHashMap<Page, Button>()
+    private var persistedTuning: TuningSync.State? = null
     private lateinit var picker: ControllerPicker
     private lateinit var editor: LayoutEditor
     private lateinit var pickedCount: TextView
@@ -80,7 +87,11 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         sensor = SteeringSensor(this)
         rumble = GameRumble(this)
-        sender = Sender(sensor, rumble)
+        sender = Sender(sensor, rumble, TuningSync(
+            Tuning.decode(prefs.getString("android_tuning", null)) ?: Tuning(),
+            prefs.getBoolean("android_tuning_pending", false),
+        ))
+        persistedTuning = sender.tuning.state()
         discovery = Discovery(this)
         savedLayout = prefs.getString("control_layout", null)?.let(ControlLayout::parseRows)
         draft = savedInstanceState?.getString("draft")?.let(ControlLayout::parseRows)
@@ -93,9 +104,10 @@ class MainActivity : Activity() {
         }
         val restored = savedInstanceState?.getString("page")
         showPage(when (restored) {
+            Page.TUNE.name -> Page.TUNE
             Page.PICK.name -> Page.PICK
             Page.EDIT.name -> Page.EDIT
-            else -> if (savedLayout == null) Page.PICK else Page.CONNECT
+            else -> if (savedLayout == null) Page.TUNE else Page.CONNECT
         })
     }
 
@@ -118,6 +130,7 @@ class MainActivity : Activity() {
         // Stop releases the pad. An unfinished edit stays open as an offline draft.
         buttonLayer.release()
         sender.stop()
+        syncTuning()
         sensor.stop()
         discovery.stop()
         ui.removeCallbacks(refresh)
@@ -131,6 +144,7 @@ class MainActivity : Activity() {
     }
 
     @Deprecated("Fallback for versions before the back dispatcher.")
+    @SuppressLint("GestureBackNavigation") // API 33+ uses the dispatcher registered in onCreate.
     override fun onBackPressed() {
         if (!handleBack()) @Suppress("DEPRECATION") super.onBackPressed()
     }
@@ -139,7 +153,8 @@ class MainActivity : Activity() {
         when (current) {
             Page.DRIVE -> stopSending()
             Page.EDIT -> showPage(Page.PICK)
-            Page.PICK -> if (sender.isRunning || savedLayout != null) finishEditing(false)
+            Page.PICK -> showPage(Page.TUNE)
+            Page.TUNE -> if (sender.isRunning || savedLayout != null) finishEditing(false)
                 else return false
             Page.CONNECT -> return false
         }
@@ -172,6 +187,16 @@ class MainActivity : Activity() {
         steerPage = buildSteerPage()
         pickPage = buildPickPage()
         editPage = buildEditPage()
+        tuningPage = buildTuningPage()
+        editTabs = toolbar().apply {
+            for ((page, label) in listOf(Page.TUNE to "Tuning", Page.PICK to "Buttons", Page.EDIT to "Layout")) {
+                val tab = button(label) { showPage(page) }
+                tabButtons[page] = tab
+                addView(tab, LinearLayout.LayoutParams(0, -1, 1f).apply {
+                    if (page != Page.TUNE) marginStart = dp(8)
+                })
+            }
+        }
         val topGap = dp(4)
         val bottomGap = dp(16)
         val root = FrameLayout(this).apply {
@@ -182,8 +207,13 @@ class MainActivity : Activity() {
                 bottomMargin = bottomGap
             })
             addView(steerPage, FrameLayout.LayoutParams(-1, -1).apply { bottomMargin = bottomGap })
-            addView(pickPage)
-            addView(editPage, FrameLayout.LayoutParams(-1, -1).apply { bottomMargin = bottomGap })
+            for (view in listOf(tuningPage, pickPage, editPage)) {
+                addView(view, FrameLayout.LayoutParams(-1, -1).apply {
+                    topMargin = dp(52)
+                    bottomMargin = bottomGap
+                })
+            }
+            addView(editTabs, FrameLayout.LayoutParams(-1, dp(48)))
         }
         // Android 15+ draws apps under the status and navigation bars.
         // Pad by their size (and any camera cutout) so nothing is hidden.
@@ -251,6 +281,22 @@ class MainActivity : Activity() {
         }
         column.addView(area, LinearLayout.LayoutParams(-1, 0, 1f))
         return area
+    }
+
+    private fun buildTuningPage(): View {
+        val column = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+        val strip = toolbar()
+        strip.addView(text("Tuning for Android", 15f), LinearLayout.LayoutParams(0, -2, 1f))
+        strip.addView(button("Done") { finishEditing(true) }.apply { tag = "tuning_done" },
+            LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
+        strip.addView(button("Next") { showPage(Page.PICK) })
+        addToolbar(column, strip)
+        tuningPanel = TuningPanel(this) { value ->
+            sender.tuning.edit(value)
+            syncTuning()
+        }
+        canvasArea(column, tuningPanel)
+        return column
     }
 
     private fun buildPickPage(): View {
@@ -349,11 +395,23 @@ class MainActivity : Activity() {
         current = page
         sender.muted = page != Page.DRIVE
         rumble.setActive(page == Page.DRIVE)
+        val editing = page == Page.TUNE || page == Page.PICK || page == Page.EDIT
+        editTabs.visibility = if (editing) View.VISIBLE else View.GONE
+        for ((target, tab) in tabButtons) {
+            tab.isSelected = target == page
+            tab.backgroundTintList = ColorStateList.valueOf(if (target == page) Theme.STEER else Theme.TROUGH)
+        }
+        tuningPage.visibility = if (page == Page.TUNE) View.VISIBLE else View.GONE
         pickPage.visibility = if (page == Page.PICK) View.VISIBLE else View.GONE
         editPage.visibility = if (page == Page.EDIT) View.VISIBLE else View.GONE
         connectPage.visibility = if (page == Page.CONNECT) View.VISIBLE else View.GONE
         steerPage.visibility = if (page == Page.DRIVE) View.VISIBLE else View.GONE
         when (page) {
+            Page.TUNE -> {
+                tuningPanel.show(sender.tuning.state().tuning)
+                tuningPage.findViewWithTag<View>("tuning_done").visibility =
+                    if (savedLayout != null || sender.isRunning) View.VISIBLE else View.GONE
+            }
             Page.PICK -> updatePicker()
             Page.EDIT -> {
                 applyLayout.text = if (sender.isRunning) "Apply & return" else "Save & continue"
@@ -381,7 +439,16 @@ class MainActivity : Activity() {
         rumble.setActive(false)
         buttonLayer.release()
         draft = savedLayout.orEmpty()
-        showPage(Page.PICK)
+        showPage(Page.TUNE)
+    }
+
+    private fun syncTuning() {
+        val state = sender.tuning.state()
+        if (state == persistedTuning) return
+        persistedTuning = state
+        prefs.edit().putString("android_tuning", state.tuning.encode())
+            .putBoolean("android_tuning_pending", state.pending).apply()
+        tuningPanel.show(state.tuning)
     }
 
     private fun storeLayout(boxes: List<Protocol.Box>) {
@@ -500,6 +567,7 @@ class MainActivity : Activity() {
 
     private val refresh = object : Runnable {
         override fun run() {
+            syncTuning()
             if (current == Page.CONNECT) {
                 // Discovered PCs; fill in the only one automatically, like the Mac app.
                 val pcs = discovery.recent()

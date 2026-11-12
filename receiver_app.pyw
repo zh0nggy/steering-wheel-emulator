@@ -25,6 +25,7 @@ import tkinter as tk
 from tkinter import messagebox
 
 import app_common
+import android_tuning
 import mock_sender
 import pad_mapping
 import phone_layout
@@ -44,9 +45,7 @@ SETTINGS_FILE = os.path.join(app_common.app_dir(),
 # laptop want different deadzone / curve / smoothing. The switch at the top of
 # the window picks which set is live; each is saved on its own.
 DEVICES = (("mac", "Mac"), ("android", "Android"))
-TUNING_DEFAULTS = {"range": 45.0, "deadzone": 0.05, "gamma": 1.5, "smooth": 0.0,
-                   "invert": False, "game_rumble": True,
-                   "rumble_boost": protocol.RUMBLE_DEFAULT_BOOST}
+TUNING_DEFAULTS = dict(android_tuning.DEFAULTS)
 # The phone sends raw rotation (+-PHONE_FULL_SCALE deg = +-1) and this window's
 # Range sets full lock. The Mac applies its own Range slider before sending,
 # so Range here is Android only (hidden on Mac) and nothing stacks.
@@ -87,6 +86,7 @@ class ReceiverEngine:
         self.ping = app_common.RollingStats(1.0)  # round-trip ms to the Mac
         self._sender_addr = None
         self.phone_layout_snapshot = None
+        self.phone_tuning_request = None
         self._stop = threading.Event()
         self._thread = None
 
@@ -134,7 +134,7 @@ class ReceiverEngine:
         received = dropped = 0
         last_seq = None
         feedback_frame = None
-        next_ping = next_layout = 0.0
+        next_ping = next_layout = next_tuning = 0.0
         st = self.status
 
         while not self._stop.is_set():
@@ -156,6 +156,14 @@ class ReceiverEngine:
                     if getattr(exc, "winerror", None) == 10040:  # oversized UDP datagram
                         continue
                     raise
+                tuning_request = android_tuning.unpack_request(data)
+                if tuning_request is not None:
+                    if cfg.get("layout") is not None and addr == self._sender_addr == sender:
+                        previous = self.phone_tuning_request
+                        if (previous is None or tuning_request.session != previous.session or
+                                tuning_request.revision > previous.revision):
+                            self.phone_tuning_request = tuning_request
+                    continue
                 if data.startswith(app_common.PHONE_LAYOUT_MAGIC):
                     if cfg["layout"] is not None and addr == self._sender_addr == sender:
                         snapshot = app_common.unpack_phone_layout(data, phone_layout.TARGET_NAMES)
@@ -189,6 +197,7 @@ class ReceiverEngine:
             if newest is not None:
                 if sender != self._sender_addr:
                     self.phone_layout_snapshot = None
+                    self.phone_tuning_request = None
                 self._sender_addr = sender
 
             # Our own ping to the Mac, ~10 per second, so this window can show
@@ -221,6 +230,18 @@ class ReceiverEngine:
                         sock.sendto(app_common.LAYOUT_CAPABILITY, self._sender_addr)
                     if reply is not None:
                         sock.sendto(reply, self._sender_addr)
+                except OSError:
+                    pass
+
+            tuning_reply = cfg.get("tuning_reply")
+            request = self.phone_tuning_request
+            if (tuning_reply is not None and request is not None
+                    and tuning_reply.session == request.session and cfg.get("layout") is not None
+                    and self._sender_addr is not None and not failsafe.is_stale()
+                    and now >= next_tuning):
+                next_tuning = now + 0.1
+                try:
+                    sock.sendto(android_tuning.pack_reply(tuning_reply), self._sender_addr)
                 except OSError:
                     pass
 
@@ -306,6 +327,8 @@ class ReceiverApp:
         self.fake = None
         self.pad = None  # virtual Xbox pad, see _get_pad
         self.phone_layout = phone_layout.PhoneLayoutWindow(root)
+        self.phone_tuning = android_tuning.TuningSync()
+        self.tuning_reply = None
         root.title("Tilt Wheel - Receiver (Windows)")
         root.resizable(False, False)
 
@@ -414,7 +437,19 @@ class ReceiverApp:
                 "range": max(10.0, self.range.get()) if self._live_device == "android" else None,
                 # Only the phone draws buttons; the Mac never gets layouts.
                 "layout": self.phone_layout.layout if self._live_device == "android" else None,
-                "layout_proposal": layout_proposal}
+                "layout_proposal": layout_proposal,
+                "tuning_reply": self.tuning_reply if self._live_device == "android" else None}
+
+    def sync_phone_tuning(self):
+        if self.engine is None or self._live_device != "android":
+            return
+        settings = self.settings()
+        current = {key: settings[key] for key in TUNING_DEFAULTS}
+        self.tuning_reply = self.phone_tuning.sync(self.engine.phone_tuning_request, current)
+        if self.tuning_reply is not None and self.tuning_reply.settings != current:
+            self.profiles["android"] = self.tuning_reply.settings
+            self._apply_profile("android")
+            self.save_settings()
 
     def _debug_rows(self):
         """Rows for the Debug window: (name, value, what it means)."""
@@ -624,6 +659,7 @@ class ReceiverApp:
 
     def refresh(self):
         eng = self.engine
+        self.sync_phone_tuning()
         rumble_enabled = self.game_rumble.get()
         self.rumble_boost_scale.config(state="normal" if rumble_enabled else "disabled")
         can_test = (rumble_enabled and self._live_device == "android" and eng is not None

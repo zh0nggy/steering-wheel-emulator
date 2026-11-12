@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import protocol
+import android_tuning
 from rumble import RumbleRelay
 
 
@@ -271,6 +272,9 @@ class ReceiverRumbleSettingsTests(unittest.TestCase):
         self.app.profiles = {key: dict(self.module.TUNING_DEFAULTS) for key, _ in self.module.DEVICES}
         self.app._live_device = "android"
         self.app.phone_layout = Mock(layout=[])
+        self.app.phone_tuning = android_tuning.TuningSync()
+        self.app.tuning_reply = None
+        self.app.engine = Mock(phone_tuning_request=None)
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         patcher = patch.object(self.module, "SETTINGS_FILE", str(Path(directory.name) / "settings.json"))
@@ -301,6 +305,31 @@ class ReceiverRumbleSettingsTests(unittest.TestCase):
         self.app.profiles["android"]["rumble_boost"] = 1000
         self.app._apply_profile("android")
         self.assertEqual(250, self.app.rumble_boost.get())
+
+    def test_phone_tuning_updates_windows_sliders_and_persisted_android_profile(self):
+        settings = dict(android_tuning.DEFAULTS, range=60, deadzone=0.1, gamma=2.0,
+                        smooth=0.2, invert=True, game_rumble=False, rumble_boost=225)
+        self.app.engine.phone_tuning_request = android_tuning.Request(bytes(16), 1, settings)
+        self.app.sync_phone_tuning()
+        for key, value in settings.items():
+            self.assertEqual(value, getattr(self.app, key).get())
+        self.assertEqual(1, self.app.settings()["tuning_reply"].acknowledged)
+        stored = json.loads(Path(self.module.SETTINGS_FILE).read_text())
+        self.assertEqual(settings, stored["profiles"]["android"])
+        self.assertEqual(android_tuning.DEFAULTS, stored["profiles"]["mac"])
+        # Repeated UDP edits must not undo a subsequent change made in Windows.
+        self.app.range.set(70)
+        self.app.sync_phone_tuning()
+        self.assertEqual(70, self.app.range.get())
+        self.assertEqual(70, self.app.tuning_reply.settings["range"])
+
+    def test_mac_profile_ignores_phone_tuning(self):
+        self.app._live_device = "mac"
+        self.app.engine.phone_tuning_request = android_tuning.Request(
+            bytes(16), 1, dict(android_tuning.DEFAULTS, gamma=3.0))
+        self.app.sync_phone_tuning()
+        self.assertEqual(1.5, self.app.gamma.get())
+        self.assertIsNone(self.app.settings()["tuning_reply"])
 
 
 if __name__ == "__main__":
