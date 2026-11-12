@@ -370,6 +370,7 @@ class ReceiverApp:
         self.ping_label.pack(side="left")
         self.debug = app_common.DebugWindow(root, "Tilt Wheel - Receiver debug", self._debug_rows)
         tk.Button(ping_row, text="Debug", command=self.debug.open).pack(side="right")
+        self.rumble_test_btn = tk.Button(ping_row, text="Test rumble", command=self.test_rumble)
 
         self.tuning = tuning = tk.LabelFrame(root, text=self._tuning_title())
         tuning.pack(fill="x", **pad)
@@ -379,17 +380,14 @@ class ReceiverApp:
         app_common.labeled_scale(tuning, 1, "Deadzone", self.deadzone, 0.0, 0.3, 0.01)
         app_common.labeled_scale(tuning, 2, "Gamma", self.gamma, 1.0, 3.0, 0.05)
         app_common.labeled_scale(tuning, 3, "Smoothing", self.smooth, 0.0, 0.9, 0.05)
-        tk.Checkbutton(tuning, text="Invert steering", variable=self.invert).grid(
-            row=4, column=0, columnspan=2, sticky="w")
-        rumble_row = tk.Frame(tuning)
-        rumble_row.grid(row=5, column=0, columnspan=3, sticky="we", pady=(6, 0))
-        tk.Checkbutton(rumble_row, text="Game rumble", variable=self.game_rumble).pack(side="left")
-        self.rumble_test_btn = tk.Button(rumble_row, text="Test rumble", command=self.test_rumble)
-        self.rumble_test_btn.pack(side="right")
-        app_common.labeled_scale(tuning, 6, "Rumble boost (%)", self.rumble_boost,
+        app_common.labeled_scale(tuning, 4, "Rumble boost (%)", self.rumble_boost,
                                  protocol.RUMBLE_MIN_BOOST, protocol.RUMBLE_MAX_BOOST, 1)
-        self.rumble_widgets = [rumble_row, *tuning.grid_slaves(row=6)]
-        self.rumble_boost_scale = next(w for w in tuning.grid_slaves(row=6) if isinstance(w, tk.Scale))
+        toggles = tk.Frame(tuning)
+        toggles.grid(row=5, column=0, columnspan=3, sticky="we")
+        tk.Checkbutton(toggles, text="Invert steering", variable=self.invert).pack(side="left")
+        self.game_rumble_toggle = tk.Checkbutton(toggles, text="Game rumble", variable=self.game_rumble)
+        self.rumble_widgets = list(tuning.grid_slaves(row=4))
+        self.rumble_boost_scale = next(w for w in self.rumble_widgets if isinstance(w, tk.Scale))
         self._show_android_tuning()
 
         self.hint = tk.Label(root, anchor="w", justify="left", fg=app_common.muted(root),
@@ -508,6 +506,12 @@ class ReceiverApp:
                 widget.grid()
             else:
                 widget.grid_remove()
+        if self._live_device == "android":
+            self.rumble_test_btn.pack(side="right", padx=(0, 6))
+            self.game_rumble_toggle.pack(side="left", padx=(12, 0))
+        else:
+            self.rumble_test_btn.pack_forget()
+            self.game_rumble_toggle.pack_forget()
 
     def _device_label(self):
         return dict(DEVICES)[self._live_device]
