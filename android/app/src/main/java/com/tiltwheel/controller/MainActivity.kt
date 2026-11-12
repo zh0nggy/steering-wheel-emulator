@@ -5,7 +5,6 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Intent
-import android.content.res.ColorStateList
 import android.content.pm.PackageManager.PERMISSION_DENIED
 import android.content.pm.PackageManager.PERMISSION_GRANTED
 import android.graphics.Color
@@ -56,8 +55,6 @@ class MainActivity : Activity() {
     private lateinit var editPage: View
     private lateinit var tuningPage: View
     private lateinit var tuningPanel: TuningPanel
-    private lateinit var editTabs: LinearLayout
-    private val tabButtons = LinkedHashMap<Page, Button>()
     private var persistedTuning: TuningSync.State? = null
     private lateinit var picker: ControllerPicker
     private lateinit var editor: LayoutEditor
@@ -188,15 +185,6 @@ class MainActivity : Activity() {
         pickPage = buildPickPage()
         editPage = buildEditPage()
         tuningPage = buildTuningPage()
-        editTabs = toolbar().apply {
-            for ((page, label) in listOf(Page.TUNE to "Tuning", Page.PICK to "Buttons", Page.EDIT to "Layout")) {
-                val tab = button(label) { showPage(page) }
-                tabButtons[page] = tab
-                addView(tab, LinearLayout.LayoutParams(0, -1, 1f).apply {
-                    if (page != Page.TUNE) marginStart = dp(8)
-                })
-            }
-        }
         val topGap = dp(4)
         val bottomGap = dp(16)
         val root = FrameLayout(this).apply {
@@ -209,11 +197,9 @@ class MainActivity : Activity() {
             addView(steerPage, FrameLayout.LayoutParams(-1, -1).apply { bottomMargin = bottomGap })
             for (view in listOf(tuningPage, pickPage, editPage)) {
                 addView(view, FrameLayout.LayoutParams(-1, -1).apply {
-                    topMargin = dp(52)
                     bottomMargin = bottomGap
                 })
             }
-            addView(editTabs, FrameLayout.LayoutParams(-1, dp(48)))
         }
         // Android 15+ draws apps under the status and navigation bars.
         // Pad by their size (and any camera cutout) so nothing is hidden.
@@ -306,6 +292,8 @@ class MainActivity : Activity() {
 
     private fun buildPickPage(): View {
         val strip = toolbar()
+        strip.addView(button("Back") { showPage(Page.TUNE) },
+            LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(8) })
         pickedCount = text("", 15f)
         strip.addView(pickedCount, LinearLayout.LayoutParams(0, -2, 1f))
         strip.addView(
@@ -400,12 +388,6 @@ class MainActivity : Activity() {
         current = page
         sender.muted = page != Page.DRIVE
         rumble.setActive(page == Page.DRIVE)
-        val editing = page == Page.TUNE || page == Page.PICK || page == Page.EDIT
-        editTabs.visibility = if (editing) View.VISIBLE else View.GONE
-        for ((target, tab) in tabButtons) {
-            tab.isSelected = target == page
-            tab.backgroundTintList = ColorStateList.valueOf(if (target == page) Theme.STEER else Theme.TROUGH)
-        }
         tuningPage.visibility = if (page == Page.TUNE) View.VISIBLE else View.GONE
         pickPage.visibility = if (page == Page.PICK) View.VISIBLE else View.GONE
         editPage.visibility = if (page == Page.EDIT) View.VISIBLE else View.GONE

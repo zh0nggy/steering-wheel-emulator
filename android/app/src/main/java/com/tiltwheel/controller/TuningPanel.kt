@@ -58,7 +58,9 @@ class TuningPanel @JvmOverloads constructor(
             box.setButtonDrawable(R.drawable.tuning_checkbox)
             box.buttonTintList = null // Preserve the white checkmark on devices with custom themes.
             box.minHeight = dp(48)
-            toggles.addView(box, LinearLayout.LayoutParams(0, -2, 1f))
+            toggles.addView(box, LinearLayout.LayoutParams(-2, -2).apply {
+                if (box === gameRumble) marginStart = dp(24)
+            })
         }
         column.addView(toggles)
         invert.setOnCheckedChangeListener { _, checked ->

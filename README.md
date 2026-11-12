@@ -48,14 +48,14 @@ Choose Android or Mac.
 1. On your phone, open the [latest release](https://github.com/zh0nggy/steering-wheel-emulator/releases/latest) and download `TiltWheel-<version>.apk`.
 2. Open the APK. If Android asks, allow your browser or file manager to **install unknown apps**, then complete the installation.
 3. Connect the phone to the same WiFi network as your PC and open **Tilt Wheel**.
-4. On first launch, the **Tuning** tab shows steering and rumble settings. Tap **Next** to choose the buttons you want on the controller diagram, then **Next** again to arrange them. Drag controls to move them or select one and drag its corner to resize it. Tap **Save & continue** to save the layout on your phone. You can leave it empty for tilt steering alone.
+4. On first launch, the **Tuning** screen shows steering and rumble settings. Tap **Next** to choose the buttons you want on the controller diagram, then **Next** again to arrange them. Drag controls to move them or select one and drag its corner to resize it. Tap **Save & continue** to save the layout on your phone. You can leave it empty for tilt steering alone.
 5. With the Windows receiver started and **Android** selected, tap your PC in the phone's list. If it does not appear, enter the IP address shown beside **This PC** in the receiver.
 6. Tap **Start sending**. Hold the phone in landscape in your neutral driving position and tap **Calibrate centre**.
 7. Turn the phone like a steering wheel. The receiver's status should turn green and its steering meter should move.
 
 Tap **Stop**, or use the back button, to return to the PC selection page.
 
-**Edit controls:** tap **Edit controls** from the connection or driving screen. It opens **Tuning** first, with the same Range, Deadzone, Gamma, Smoothing, Rumble boost, Invert steering, and Game rumble controls as Windows. Use the **Buttons** and **Layout** tabs to choose and arrange touch controls. Tuning changes save automatically; **Done** saves the current layout and returns to the previous screen. While editing during a session, the phone stays connected and sends neutral controls. **Apply & return** saves the layout and resumes driving; **Cancel** discards layout changes. Hold a control while driving to press it. **LT** and **RT** act as brake and throttle.
+**Edit controls:** tap **Edit controls** from the connection or driving screen. It opens **Tuning** first, with the same Range, Deadzone, Gamma, Smoothing, Rumble boost, Invert steering, and Game rumble controls as Windows. Use **Next** to choose buttons and arrange touch controls; **Back** returns to the preceding screen. Tuning changes save automatically; **Done** saves the current layout and returns to the previous screen. While editing during a session, the phone stays connected and sends neutral controls. **Apply & return** saves the layout and resumes driving; **Cancel** discards layout changes. Hold a control while driving to press it. **LT** and **RT** act as brake and throttle.
 
 On Windows, selecting **Android** opens the Phone layout window. While connected it shows the phone's layout, and you can still add, move, resize, or right-click to remove buttons there. Windows edits sync to the phone. If both devices edit the same layout at once, saving on the phone takes priority. Use matching app versions for editing on both devices.
 
@@ -125,7 +125,7 @@ If the sender stops or the connection is lost, the receiver centres steering and
 
 ### Android game rumble
 
-The phone can vibrate in response to the game's Xbox controller rumble. Update both the Windows receiver and Android app together, select **Android** on the receiver, and leave **Dry run** unchecked for game feedback. Enable vibration in the game's controller settings and leave **Game rumble** checked in the phone's **Edit controls → Tuning** tab or Windows' **Tuning for Android** panel. **Rumble boost (%)** lifts quieter game feedback; start at the default 150% and adjust for your phone. Both interfaces edit the same Android tuning profile and sync while connected.
+The phone can vibrate in response to the game's Xbox controller rumble. Update both the Windows receiver and Android app together, select **Android** on the receiver, and leave **Dry run** unchecked for game feedback. Enable vibration in the game's controller settings and leave **Game rumble** checked in the phone's **Edit controls → Tuning** screen or Windows' **Tuning for Android** panel. **Rumble boost (%)** lifts quieter game feedback; start at the default 150% and adjust for your phone. Both interfaces edit the same Android tuning profile and sync while connected.
 
 To try it, start the Windows receiver, tap **Start sending** on the phone, and click **Test rumble** in Windows. It plays one second of steady vibration on the connected phone, then resumes any game feedback. The test also works in **Dry run**, without a game or virtual controller. Unchecking **Game rumble** stops both test and game vibration.
 
@@ -133,7 +133,7 @@ The receiver sends both game motor strengths back over the existing WiFi connect
 
 ## Tuning
 
-The receiver saves separate tuning profiles for Mac and Android. Choose the device beside **This PC** to adjust its profile. Android also has these settings in **Edit controls → Tuning**, the first editor tab. Changes from either device sync live while connected. Phone edits made offline are saved and applied to Windows on the next connection. With no pending phone edits, connecting loads the current Windows profile onto the phone. Use matching app versions for tuning on both devices.
+The receiver saves separate tuning profiles for Mac and Android. Choose the device beside **This PC** to adjust its profile. Android also has these settings in **Edit controls → Tuning**, the first editor screen. Changes from either device sync live while connected. Phone edits made offline are saved and applied to Windows on the next connection. With no pending phone edits, connecting loads the current Windows profile onto the phone. Use matching app versions for tuning on both devices.
 
 | Setting | Where | What it does |
 |---|---|---|
