@@ -116,7 +116,7 @@ jobs:
           name="TiltWheel-Mac-Sender-$v"
           mkdir -p "stage/$name" out
           cp sender_app.py mac_sender.py imu_reader.py imu_probe.py key_input.py \
-             controller_view.py app_common.py protocol.py demo_imu.py \
+             controller_view.py controller_art.py app_common.py protocol.py demo_imu.py \
              "Start Sender.command" README.md "stage/$name/"
           chmod +x "stage/$name/Start Sender.command"
           (cd stage && zip -qr "../out/$name.zip" "$name")

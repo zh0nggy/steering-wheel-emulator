@@ -1,8 +1,8 @@
 """Clickable Xbox-controller picture for binding Mac keys to pad buttons.
 
 Click a button on the drawing, then press the key you want for it. Escape
-cancels, Backspace/Delete clears the binding. Each button shows its key, and
-lights up while that key is held, so you can see what reaches the PC.
+cancels, Backspace/Delete clears the binding. The artwork matches Windows;
+assigned keys appear below it, and held controls light up on the drawing.
 
 Bindings are {target: tk keysym}. Targets are the protocol.BUTTONS names plus
 "RT" and "LT" for the analog triggers (held key = pedal ramps up).
@@ -11,9 +11,9 @@ Bindings are {target: tk keysym}. Targets are the protocol.BUTTONS names plus
 import tkinter as tk
 
 from app_common import is_dark
+from controller_art import ControllerArtwork, FACE_COLORS
 
-# Display names for keysyms (Tk names -> what's printed on the key).
-# Short enough to fit inside the small round buttons.
+# Display names for keysyms in the binding summary and hover instructions.
 KEY_LABELS = {
     "Shift_L": "LShf", "Shift_R": "RShf", "Control_L": "LCtl",
     "Control_R": "RCtl", "Alt_L": "LOpt", "Alt_R": "ROpt",
@@ -79,19 +79,14 @@ DARK = {
     "bound": "#2f4f78", "held": "#2b7de9", "picking": "#c79a1e",
     "key_text": "#f2f2f2", "label": "#9a9a9a", "hint": "#a8a8a8", "hint_active": "#f0a63a",
 }
-FACE_COLORS = {"A": "#2fa84f", "B": "#d64545", "X": "#2b7de9", "Y": "#d9a400"}
-
-
-
-
-class ControllerView(tk.Frame):
-    """The drawing plus a one-line hint underneath.
+class ControllerView(ControllerArtwork, tk.Frame):
+    """The shared drawing, binding instructions and assigned keys.
 
     on_change(bindings) is called whenever a binding is set or cleared.
     """
 
-    TRIGGER_TOP = 10   # where _draw puts the trigger row
-    ROW_GAP = 13       # gap between rows: Reset -> triggers -> bumpers -> body
+    ROW_GAP = 13
+    SHOW_BINDINGS = True
     # Starting height; __init__ trims the canvas to fit the finished drawing.
     W, H = 440, 400
 
@@ -103,7 +98,7 @@ class ControllerView(tk.Frame):
         self.held_targets = set()
         self.listeners = []
         self.shapes = {}   # target -> canvas item to recolour
-        self.labels = {}   # target -> canvas text item for the key name
+        self.labels = {}   # target -> text or icon, kept identical to Windows
 
         # Same background as the window, so the drawing sits on it rather than
         # in a pale box; then colours to suit a light or dark window.
@@ -111,8 +106,13 @@ class ControllerView(tk.Frame):
         self.canvas = tk.Canvas(self, width=self.W, height=self.H, bg=self.cget("bg"),
                                 highlightthickness=0)
         self.canvas.pack()
-        self.hint = tk.Label(self, anchor="w", justify="left", fg=self.colors["hint"])
+        self.hint = tk.Label(self, anchor="w", justify="left", fg=self.colors["hint"], wraplength=self.W)
         self.hint.pack(fill="x", pady=(2, 0))
+        self.binding_summary = None
+        if self.SHOW_BINDINGS:
+            self.binding_summary = tk.Label(self, anchor="w", justify="left",
+                                            fg=self.colors["hint"], wraplength=self.W)
+            self.binding_summary.pack(fill="x", pady=(2, 0))
         # Reset goes in a strip above the drawing, top-right corner.
         self.reset_btn = tk.Button(self.canvas, text="Reset to defaults",
                                    command=self.reset)
@@ -123,9 +123,9 @@ class ControllerView(tk.Frame):
         drawn = [i for i in self.canvas.find_all() if self.canvas.type(i) != "window"]
         for item in drawn:
             self.canvas.move(item, 0, top)
-        # So fit_height() redraws the body where it now sits.
+        # Shared coordinates after fitting the drawing beneath the top strip.
         self.offset = top + self.body_shift
-        # Fit the canvas to the drawing; fit_height() can stretch it later.
+        # Preserve the same silhouette and proportions as the Windows drawing.
         lowest = max(self.canvas.bbox(i)[3] for i in drawn)
         self._natural_height = lowest + 2
         self.canvas.config(height=self._natural_height)
@@ -133,54 +133,6 @@ class ControllerView(tk.Frame):
         self._set_hint()
 
     # ---------- drawing ----------
-
-    # Controller outline traced as one smooth polygon (x, y), left half only;
-    # the right half is mirrored. Roughly the Xbox Series pad silhouette.
-    # The top edge sits above the Y button and the shoulders are wide enough
-    # that X/B and the sticks have clearance. y values below BODY_SPLIT are
-    # the grips: _fit_body() stretches them to fill the available height.
-    _HALF_OUTLINE = [
-        (220, 80), (150, 80), (106, 85), (76, 98), (54, 120), (40, 152),
-        (30, 190), (22, 232), (20, 268), (28, 292), (48, 302), (70, 296),
-        (96, 270), (124, 240), (150, 226), (220, 226),
-    ]
-    BODY_TOP = 80      # top edge of the outline
-    BODY_SPLIT = 210   # rows below this are the grips, which stretch
-
-    def _drawing_top(self):
-        return 3 + self.reset_btn.winfo_reqheight() + self.ROW_GAP - self.TRIGGER_TOP
-
-    def _space_shoulders(self):
-        # Bumpers end at y=74; separate the body from the key-binding rows.
-        shift = 74 + self.ROW_GAP - self.BODY_TOP
-        for item in self.canvas.find_all():
-            if self.canvas.type(item) != "window" and self.canvas.bbox(item)[1] >= 76:
-                self.canvas.move(item, 0, shift)
-        return shift
-
-    def _draw(self):
-        c = self.canvas
-        mid = self.W / 2
-        self.offset = 0  # _body_points adds this; __init__ sets it after the shift
-        self.body = c.create_polygon(self._body_points(0), smooth=True, splinesteps=24,
-                                     fill=self.colors["body"], outline=self.colors["outline"], width=2)
-
-        # Triggers (back) and bumpers (top edge), labelled since they look alike.
-        self._button("LT", c.create_rectangle(64, 10, 148, 36), (106, 23))
-        self._button("RT", c.create_rectangle(292, 10, 376, 36), (334, 23))
-        self._button("LB", c.create_rectangle(80, 50, 170, 74), (125, 62))
-        self._button("RB", c.create_rectangle(270, 50, 360, 74), (315, 62))
-        for text, x, y in (("LT", 56, 23), ("RT", 384, 23), ("LB", 72, 62), ("RB", 368, 62)):
-            c.create_text(x, y, text=text, fill=self.colors["label"], font=("Helvetica", 8, "bold"),
-                          anchor="e" if x < mid else "w")
-
-        self._draw_front_controls()
-
-    STICK_CENTERS = ((118, 140), (268, 190))
-    FACE_CENTER = (334, 140)
-    FACE_SPACING = 27
-    SYSTEM_BUTTONS = (("GUIDE", 0, 113, 17), ("VIEW", -33, 147, 11), ("MENU", 33, 147, 11))
-    SYSTEM_ICONS = {}
 
     def _draw_front_controls(self):
         """The shared Xbox layout, independent of the shoulder artwork."""
@@ -206,45 +158,10 @@ class ControllerView(tk.Frame):
             shape = c.create_oval(x - radius, y - radius, x + radius, y + radius)
             self._button(target, shape, (x, y), icon_points=self.SYSTEM_ICONS.get(target))
 
-    def _draw_dpad(self):
-        c = self.canvas
-        # D-pad: four arms around a centre square.
-        cx, cy, a, w = 172, 190, 32, 12
-        self._button("DPAD_UP", c.create_rectangle(cx - w, cy - a, cx + w, cy - w),
-                     (cx, cy - a + 10))
-        self._button("DPAD_DOWN", c.create_rectangle(cx - w, cy + w, cx + w, cy + a),
-                     (cx, cy + a - 10))
-        self._button("DPAD_LEFT", c.create_rectangle(cx - a, cy - w, cx - w, cy + w),
-                     (cx - a + 10, cy))
-        self._button("DPAD_RIGHT", c.create_rectangle(cx + w, cy - w, cx + a, cy + w),
-                     (cx + a - 10, cy))
-        c.create_rectangle(cx - w, cy - w, cx + w, cy + w, fill=self.colors["ring"], outline=self.colors["outline"])
-
-    def _body_points(self, stretch):
-        """Outline coordinates with the grips pulled down by `stretch` px.
-        Points below BODY_SPLIT move further the lower they are, so the grips
-        lengthen smoothly instead of the whole body sliding."""
-        mid = self.W / 2
-        left = []
-        for x, y in self._HALF_OUTLINE:
-            if y > self.BODY_SPLIT:
-                y += stretch * (y - self.BODY_SPLIT) / (302 - self.BODY_SPLIT)
-            left.append((x, y + self.offset))
-        right = [(2 * mid - x, y) for x, y in reversed(left)]
-        return [coord for xy in left + right for coord in xy]
-
-    MAX_STRETCH = 40   # past this the grips turn into stilts; pad instead
 
     def fit_height(self, height):
-        """Make the drawing `height` px tall. The grips lengthen by up to
-        MAX_STRETCH; any more is returned so the caller can pad with it.
-        Called by the app once the window's real height is known."""
-        natural = self._natural_height
-        extra = max(0, height - natural)
-        stretch = min(extra, self.MAX_STRETCH)
-        self.canvas.coords(self.body, *self._body_points(stretch))
-        self.canvas.config(height=natural + stretch)
-        return extra - stretch
+        """Keep the shared controller proportions; return extra space as padding."""
+        return max(0, height - self._natural_height)
 
     def _button(self, target, item, label_at, *, icon_points=None):
         c = self.canvas
@@ -258,58 +175,51 @@ class ControllerView(tk.Frame):
         self.labels[target] = label
         for tag in (item, label):
             c.tag_bind(tag, "<Button-1>", lambda _e, t=target: self.start_pick(t))
-            c.tag_bind(tag, "<Enter>", lambda _e: c.config(cursor="hand2"))
-            c.tag_bind(tag, "<Leave>", lambda _e: c.config(cursor=""))
+            c.tag_bind(tag, "<Enter>", lambda _e, t=target: self._hover(t))
+            c.tag_bind(tag, "<Leave>", lambda _e: self._leave())
 
     # ---------- state ----------
 
     def _refresh(self, target):
-        col = self.colors
-        if target == self.picking:
-            state = "picking"
-        elif target in self.held_targets:
-            state = "held"
-        elif target in self.bindings:
-            state = "bound"
-        else:
-            state = "button"
-        self.canvas.itemconfig(self.shapes[target], fill=col[state])
-        key = self.bindings.get(target)
-        # Triggers and bumpers are wide, so they get the full key name.
-        wide = target in ("LT", "RT", "LB", "RB")
-        text = "?" if target == self.picking else (
-            WIDE_LABELS.get(key, key_label(key)) if wide else key_label(key))
-        font = ("Helvetica", 8)
-        # Dark text on the light yellow "press a key" fill, else palette text.
-        if state == "held":
-            color = "white"
-        elif state == "picking":
-            color = "#222"
-        elif key is None and target in FACE_COLORS:
-            # Unbound face button: show its own letter, in its colour.
-            text, color, font = target, FACE_COLORS[target], ("Helvetica", 11, "bold")
-        else:
-            color = col["key_text"]
-        self.canvas.itemconfig(self.labels[target], text=text, fill=color, font=font)
+        self.paint_target(target, target in self.bindings,
+                          held=target in self.held_targets, picking=target == self.picking)
 
     def _refresh_all(self):
         for target in self.shapes:
             self._refresh(target)
+        self._redraw_art()
 
     def _set_hint(self, extra=""):
         if self.picking:
             text = (f"Press a key for {TARGET_NAMES[self.picking]}.  "
                     "Esc = cancel, Backspace = clear.")
         else:
-            text = "Click a button on the controller, then press a Mac key for it."
+            text = "Click a control to bind a Mac key. Blue outline = bound."
         self.hint.config(text=text + (f"  {extra}" if extra else ""),
                          fg=self.colors["hint_active" if self.picking else "hint"])
+        if self.binding_summary is not None:
+            bindings = [f"{self.CONTROL_LABELS.get(target, target)}: {WIDE_LABELS.get(key, key_label(key))}"
+                        for target in self.shapes if (key := self.bindings.get(target)) is not None]
+            self.binding_summary.config(text="   ·   ".join(bindings) if bindings else "No keys assigned.")
+
+    def _hover(self, target):
+        self.canvas.config(cursor="hand2")
+        if self.SHOW_BINDINGS and self.picking is None:
+            key = self.bindings.get(target)
+            binding = WIDE_LABELS.get(key, key_label(key)) if key else "Unbound"
+            self.hint.config(text=f"{TARGET_NAMES[target]}: {binding}. Click to change.")
+
+    def _leave(self):
+        self.canvas.config(cursor="")
+        if self.SHOW_BINDINGS:
+            self._set_hint()
 
     def start_pick(self, target):
         previous, self.picking = self.picking, target
         if previous:
             self._refresh(previous)
         self._refresh(target)
+        self._redraw_art()
         self._set_hint()
         for callback in self.listeners:
             callback()
@@ -370,3 +280,4 @@ class ControllerView(tk.Frame):
         for target in changed:
             if target in self.shapes:
                 self._refresh(target)
+        self._redraw_art()

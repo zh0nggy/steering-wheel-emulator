@@ -64,10 +64,10 @@ On Windows, selecting **Android** opens the Phone layout window. While connected
 The Mac release is a ZIP of the sender scripts and launcher. It still needs Python and the sensor library; it is not a standalone macOS app.
 
 1. Install **Python 3** from [python.org](https://www.python.org/downloads/macos/), which includes Tkinter.
-2. Open Terminal and install the sensor library:
+2. Open Terminal and install the sensor library and smooth artwork renderer:
 
    ```bash
-   python3 -m pip install macimu
+   python3 -m pip install macimu Pillow
    ```
 
 3. Download `TiltWheel-Mac-Sender-<version>.zip` from the release and unzip it.
@@ -102,7 +102,7 @@ xattr -dr com.apple.quarantine .
 
 ### Mac keyboard bindings
 
-Click a button on the controller picture, then press the key you want to assign. Press **Esc** to cancel or **Backspace** to clear the binding. Assigning a key to another button moves it from the previous button.
+The Mac sender uses the same controller artwork as the Windows editor. Click a button on the controller picture, then press the key you want to assign. Blue outlines mark bound controls; the assigned keys appear below the diagram and when hovering over a control. Held controls light up. Press **Esc** to cancel or **Backspace** to clear the binding. Assigning a key to another button moves it from the previous button.
 
 | Default key | Controller input | Typical use |
 |---|---|---|

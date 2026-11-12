@@ -442,7 +442,7 @@ class SenderApp:
             row=3, column=0, sticky="w")
 
         # --- controller: click a button, press a key ---
-        pedals = tk.LabelFrame(right, text="Controls (this window must be in front)")
+        pedals = tk.LabelFrame(right, text="Controller (keep this window in front)")
         # Stretch to the window's full height so both columns end on one line.
         pedals.pack(fill="both", expand=True, **pad)
         self.controller = controller_view.ControllerView(
@@ -456,8 +456,8 @@ class SenderApp:
 
         root = outer
         root.protocol("WM_DELETE_WINDOW", self.close)
-        # The left column sets the window height. Whatever the Controls box
-        # has left over goes to the controller's grips, so the drawing fills it.
+        # The left column sets the window height. Centre the shared controller
+        # artwork in any spare space without changing its proportions.
         # Sizes are only real once the window is on screen, so run it then.
         self._pedals = pedals
         root.after_idle(self._fill_controls)
@@ -512,12 +512,7 @@ class SenderApp:
         ]
 
     def _fill_controls(self):
-        """Stretch the controller so the Controls box has no empty band.
-
-        The box is as tall as the left column; its contents are shorter. The
-        difference goes to the drawing. Measured from the left column rather
-        than the box, because the box itself grows when the drawing does.
-        """
+        """Centre the controller while preserving the Windows artwork's proportions."""
         self.root.update_idletasks()
         box = self._pedals
         left = box.master.master.winfo_children()[0]   # the left column frame
@@ -527,7 +522,6 @@ class SenderApp:
             canvas = self.controller.canvas
             leftover = self.controller.fit_height(canvas.winfo_reqheight() + spare)
             if leftover > 0:
-                # Too much to stretch nicely: centre the drawing in the extra.
                 self.controller.pack_configure(pady=(4 + leftover // 2, leftover - leftover // 2))
 
     def _bindings_changed(self, bindings):

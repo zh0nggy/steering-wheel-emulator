@@ -1,0 +1,97 @@
+import tkinter as tk
+import unittest
+from unittest.mock import Mock, patch
+
+import controller_art
+from controller_view import ControllerView, DEFAULT_BINDINGS, TARGET_NAMES
+from phone_layout import PhoneControllerView
+
+
+class ControllerViewTests(unittest.TestCase):
+    def setUp(self):
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f"Tk display unavailable: {exc}")
+        self.root.withdraw()
+        self.addCleanup(self.root.destroy)
+
+    def pixels(self, view):
+        return controller_art.render_controller_image(view.canvas).tobytes()
+
+    @unittest.skipIf(controller_art.Image is None, "Pillow is optional")
+    def test_mac_and_windows_render_identical_controls_for_matching_selections(self):
+        for targets in ((), tuple(DEFAULT_BINDINGS), tuple(TARGET_NAMES)):
+            with self.subTest(targets=targets):
+                bindings = {target: f"F{index + 1}" for index, target in enumerate(targets)}
+                mac = ControllerView(self.root, bindings)
+                windows = PhoneControllerView(self.root, {})
+                for target in targets:
+                    windows.paint_target(target, True)
+                self.assertEqual(self.pixels(windows), self.pixels(mac))
+                self.assertEqual(set(TARGET_NAMES), set(mac.shapes))
+                mac.destroy()
+                windows.destroy()
+
+    def test_rebinding_moves_keys_clears_and_resets_without_replacing_controller_labels(self):
+        changed = Mock()
+        view = ControllerView(self.root, DEFAULT_BINDINGS, on_change=changed)
+        view.start_pick("GUIDE")
+        self.assertTrue(view.handle_key("Return"))
+        self.assertEqual("Return", view.bindings["GUIDE"])
+        self.assertNotIn("X", view.bindings)
+        changed.assert_called_with(view.bindings)
+        view.start_pick("DPAD_UP")
+        self.assertTrue(view.handle_key("W"))
+        self.assertEqual("w", view.bindings["DPAD_UP"])
+        view.start_pick("DPAD_UP")
+        view.handle_key("Escape")
+        self.assertEqual("w", view.bindings["DPAD_UP"])
+        view.start_pick("DPAD_UP")
+        view.handle_key("BackSpace")
+        self.assertNotIn("DPAD_UP", view.bindings)
+        view.reset()
+        self.assertEqual(DEFAULT_BINDINGS, view.bindings)
+        self.assertEqual("A", view.canvas.itemcget(view.labels["A"], "text"))
+        self.assertEqual("X", view.canvas.itemcget(view.labels["X"], "text"))
+        self.assertIn("LT: Right Shift", view.binding_summary.cget("text"))
+        self.assertIn("RT: Left Shift", view.binding_summary.cget("text"))
+
+    @unittest.skipIf(controller_art.Image is None, "Pillow is optional")
+    def test_picking_and_held_changes_repaint_visible_art_and_preserve_bindings(self):
+        view = ControllerView(self.root, DEFAULT_BINDINGS)
+        idle = self.pixels(view)
+        initial_art = view._art
+        view.show_held({"A", "LT"})
+        self.assertIsNot(initial_art, view._art)
+        self.assertNotEqual(idle, self.pixels(view))
+        held_art = view._art
+        view.show_held({"A", "LT"})
+        self.assertIs(held_art, view._art)
+        view.show_held(set())
+        self.assertEqual(idle, self.pixels(view))
+        view.start_pick("A")
+        self.assertNotEqual(idle, self.pixels(view))
+        self.assertIn("Press a key for A", view.hint.cget("text"))
+        view.handle_key("Escape")
+        self.assertEqual(idle, self.pixels(view))
+        self.assertEqual(DEFAULT_BINDINGS, view.bindings)
+
+    @unittest.skipIf(controller_art.Image is None, "Pillow is optional")
+    def test_fitting_mac_panel_keeps_windows_controller_proportions(self):
+        view = ControllerView(self.root, DEFAULT_BINDINGS)
+        original = self.pixels(view)
+        view.fit_height(view._natural_height + 100)
+        self.assertEqual(original, self.pixels(view))
+
+    def test_binding_still_works_without_optional_smooth_renderer(self):
+        with patch.object(controller_art, "Image", None):
+            view = ControllerView(self.root, DEFAULT_BINDINGS)
+            view.start_pick("DPAD_RIGHT")
+            view.handle_key("Right")
+            self.assertEqual("Right", view.bindings["DPAD_RIGHT"])
+            self.assertFalse(view.canvas.find_withtag("controller_art"))
+
+
+if __name__ == "__main__":
+    unittest.main()
