@@ -83,6 +83,7 @@ class ReceiverEngine:
         self.error = None
         self.rumble_error = None
         self.rumble_test_until = 0.0
+        self.sweep_started = None  # GUI selects a local test override, never a second UDP sender.
         self.ping = app_common.RollingStats(1.0)  # round-trip ms to the Mac
         self._sender_addr = None
         self.phone_layout_snapshot = None
@@ -135,11 +136,14 @@ class ReceiverEngine:
         last_seq = None
         feedback_frame = None
         next_ping = next_layout = next_tuning = 0.0
+        next_sweep = 0.0
+        previous_sweep = None
         st = self.status
 
         while not self._stop.is_set():
             cfg = self.settings
             now = time.monotonic()
+            sweep_started = self.sweep_started
             beacon.tick()
 
             # Keep the latest sequence from the active sender, even if UDP
@@ -252,8 +256,28 @@ class ReceiverEngine:
                     dropped += ((newest_seq - last_seq) & 0xFFFFFFFF) - 1
                 last_seq = newest_seq
                 failsafe.note_packet()
+                st["sender"] = sender[0]
 
-                target = -newest["steer"] if cfg["invert"] else newest["steer"]
+            stale = failsafe.is_stale()
+            sweep_changed = sweep_started != previous_sweep
+            if sweep_changed:
+                # Do not carry held controls or smoothing from the previous source.
+                steer = throttle = brake = 0.0
+                mask = 0
+                next_sweep = 0.0
+                previous_sweep = sweep_started
+
+            frame = None
+            if sweep_started is not None:
+                if now >= next_sweep:
+                    frame = {"steer": mock_sender.steering_for("sweep", now - sweep_started, 4.0),
+                             "right_trigger": 0.0, "left_trigger": 0.0, "buttons": 0}
+                    next_sweep = now + 0.01
+            elif newest is not None or (sweep_changed and not stale):
+                frame = feedback_frame
+
+            if frame is not None:
+                target = -frame["steer"] if cfg["invert"] else frame["steer"]
                 if cfg["range"] is not None:
                     target = protocol.clamp(target * PHONE_FULL_SCALE / cfg["range"], -1.0, 1.0)
                 target = shape(target, cfg["deadzone"], cfg["gamma"])
@@ -261,16 +285,15 @@ class ReceiverEngine:
                     steer += (target - steer) * (1.0 - cfg["smooth"])
                 else:
                     steer = target
-                throttle = newest["right_trigger"]
-                brake = newest["left_trigger"]
-                mask = newest["buttons"]
-                st["sender"] = sender[0]
+                throttle = frame["right_trigger"]
+                brake = frame["left_trigger"]
+                mask = frame["buttons"]
 
-            stale = failsafe.is_stale()
             if stale:
-                # Release everything, so a lost link can't leave a button held.
-                steer = throttle = brake = 0.0
-                mask = 0
+                if sweep_started is None:
+                    # Release everything, so a lost link can't leave a button held.
+                    steer = throttle = brake = 0.0
+                    mask = 0
                 last_seq = None  # allow a sender to restart after a disconnect
             buttons.update(pad, mask)
 
@@ -279,52 +302,24 @@ class ReceiverEngine:
                 pad.update()
 
             if not stale and cfg.get("layout") is not None:
-                if not cfg.get("game_rumble", True):
+                if sweep_started is not None or not cfg.get("game_rumble", True):
                     self.rumble_test_until = 0.0
                 rumble.tick(sock, self._sender_addr, feedback_frame, now,
-                            enabled=cfg.get("game_rumble", True),
+                            enabled=cfg.get("game_rumble", True) and sweep_started is None,
                             boost=cfg.get("rumble_boost"), test_until=self.rumble_test_until)
             else:
                 self.rumble_test_until = 0.0
 
             st.update(steer=steer, throttle=throttle, brake=brake, frames=received,
                       dropped=dropped, presses=buttons.presses,
-                      held=tuple(sorted(buttons.held)), linked=not stale)
+                      held=tuple(sorted(buttons.held)), linked=not stale or sweep_started is not None)
             time.sleep(0.001)  # ~1.5 ms in practice; frames wait at most that long
-
-
-class FakeSender:
-    """Built-in mock_sender.py: sweeps steering into this same PC (127.0.0.1)."""
-
-    def __init__(self, port):
-        self.port = port
-        self._stop = threading.Event()
-
-    def start(self):
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def stop(self):
-        self._stop.set()
-
-    def _run(self):
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        start = time.monotonic()
-        seq = 0
-        try:
-            while not self._stop.is_set():
-                steer = mock_sender.steering_for("sweep", time.monotonic() - start, 4.0)
-                sock.sendto(protocol.pack(steer, seq=seq), ("127.0.0.1", self.port))
-                seq += 1
-                time.sleep(0.01)
-        finally:
-            sock.close()
 
 
 class ReceiverApp:
     def __init__(self, root):
         self.root = root
         self.engine = None
-        self.fake = None
         self.pad = None  # virtual Xbox pad, see _get_pad
         self.phone_layout = phone_layout.PhoneLayoutWindow(root)
         self.phone_tuning = android_tuning.TuningSync()
@@ -462,13 +457,13 @@ class ReceiverApp:
         loss = f"{100 * dropped / total:.1f}%" if total else "--"
         rtt = eng.ping.summary()
         return [
-            ("linked", "yes" if st["linked"] else "no", "receiving packets right now"),
+            ("linked", "yes" if st["linked"] else "no", "receiving packets or running fake sweep"),
             ("rumble", eng.rumble_error or ("available" if eng.pad is not None else "dry run"),
              "enable Game rumble in Android tuning and vibration in the game"),
             ("from", st["sender"] or "--", "the sending device's address"),
             ("steer", f"{st['steer']:+.3f}", "after deadzone / gamma, sent to the pad"),
             ("held", " ".join(st["held"]) or "-", "pad buttons held right now"),
-            ("frames", f"{frames}", f"updates applied from the {self._device_label()}"),
+            ("frames", f"{frames}", f"updates received from the {self._device_label()}"),
             ("dropped", f"{dropped}", "packets lost or skipped as stale"),
             ("loss", loss, "dropped / total. Fine under ~10%"),
             ("ping avg", f"{rtt[0]:.1f} ms" if rtt else "--", f"round trip to the {self._device_label()}"),
@@ -581,7 +576,7 @@ class ReceiverApp:
     def test_rumble(self):
         """Preview on the connected phone, through the receiver thread's socket."""
         if (self._live_device == "android" and self.game_rumble.get()
-                and self.engine is not None and self.engine.status["linked"]):
+                and self.engine is not None and self.engine.status["linked"] and not self.sweeping):
             self.engine.rumble_test_until = time.monotonic() + 1.0
 
     def toggle(self):
@@ -634,27 +629,28 @@ class ReceiverApp:
         # again (a harmless no-op on a removed target) and frees the memory.
 
     def stop_engine(self):
-        if self.fake is not None:
-            self.toggle_fake()
         self.engine.stop()
         self.engine = None
+        self.fake_btn.config(text="Test: fake sweep")
         self.start_btn.config(text="Start")
         self.ping_label.config(text="Ping: -- ms", fg=app_common.muted(self.root))
         for bar in self.bars.values():
             bar.set(0.0)
 
+    @property
+    def sweeping(self):
+        return self.engine is not None and self.engine.sweep_started is not None
+
     def toggle_fake(self):
-        if self.fake is not None:
-            self.fake.stop()
-            self.fake = None
+        if self.sweeping:
+            self.engine.sweep_started = None
             self.fake_btn.config(text="Test: fake sweep")
             return
         if self.engine is None:
             self.toggle()
             if self.engine is None:
                 return
-        self.fake = FakeSender(self.engine.port)
-        self.fake.start()
+        self.engine.sweep_started = time.monotonic()
         self.fake_btn.config(text="Stop fake sweep")
 
     def refresh(self):
@@ -663,7 +659,7 @@ class ReceiverApp:
         rumble_enabled = self.game_rumble.get()
         self.rumble_boost_scale.config(state="normal" if rumble_enabled else "disabled")
         can_test = (rumble_enabled and self._live_device == "android" and eng is not None
-                    and eng.status["linked"] and self.fake is None)
+                    and eng.status["linked"] and not self.sweeping)
         self.rumble_test_btn.config(state="normal" if can_test else "disabled")
         proposal = self.phone_layout.sync(
             eng.phone_layout_snapshot if eng is not None and self._live_device == "android" else None
@@ -684,7 +680,7 @@ class ReceiverApp:
                 for key, bar in self.bars.items():
                     bar.set(st[key])
                 if st["linked"]:
-                    source = "fake sweep" if self.fake else st["sender"]
+                    source = "fake sweep" if self.sweeping else st["sender"]
                     self.status.config(text=f"Receiving from {source}", fg="#1d7a35")
                 else:
                     self.status.config(

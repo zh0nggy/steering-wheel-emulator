@@ -37,7 +37,7 @@ Both devices must be on the same local network. Use one sender at a time: the re
 
 The Windows release does not require Python, Java, or a separate `vgamepad` installation.
 
-To check the virtual controller, press **Test: fake sweep**, then press Win+R and enter `joy.cpl`. An Xbox 360 controller should appear and its stick should move left and right. Press **Stop fake sweep** before connecting your sender. Leave **Dry run (no virtual pad)** unchecked when playing.
+To check the virtual controller, press **Test: fake sweep**, then press Win+R and enter `joy.cpl`. An Xbox 360 controller should appear and its stick should move left and right. The sweep temporarily takes over the controller while a connected phone or Mac stays connected. **Stop fake sweep** returns control to that sender, or centres the controller if no sender is connected. Leave **Dry run (no virtual pad)** unchecked when playing.
 
 ## 2. Set up your sender
 
