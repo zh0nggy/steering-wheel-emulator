@@ -70,12 +70,13 @@ class ControllerViewTests(unittest.TestCase):
         self.assertEqual(DEFAULT_BINDINGS, view.bindings)
         self.assertEqual("A", view.canvas.itemcget(view.labels["A"], "text"))
         self.assertEqual("X", view.canvas.itemcget(view.labels["X"], "text"))
-        self.assertFalse(any(isinstance(child, tk.Label) and child.winfo_manager() == "pack"
-                             for child in view.winfo_children()))
+        self.assertEqual("", view.hint.cget("text"))
         view._hover("LT")
         self.assertIn("Right Shift", view.hint.cget("text"))
-        self.assertTrue(view.canvas.find_withtag("binding_hint"))
+        self.assertEqual("pack", view.hint.winfo_manager())
+        self.assertFalse(view.canvas.find_withtag("binding_hint"))
         view._leave()
+        self.assertEqual("", view.hint.cget("text"))
         self.assertFalse(view.canvas.find_withtag("binding_hint"))
 
     @unittest.skipIf(controller_art.Image is None, "Pillow is optional")

@@ -102,7 +102,7 @@ xattr -dr com.apple.quarantine .
 
 ### Mac keyboard bindings
 
-The Mac sender uses the same controller body as the Windows editor, with raised LT/RT triggers above the bumpers like Android. Click a button on the controller picture, then press the key you want to assign. Blue outlines mark bound controls; hover over a control to see its assigned key. Held controls light up. Press **Esc** to cancel or **Backspace** to clear the binding. Assigning a key to another button moves it from the previous button.
+The Mac sender uses the same controller body as the Windows editor, with raised LT/RT triggers above the bumpers like Android. Click a button on the controller picture, then press the key you want to assign. Blue outlines mark bound controls; hover over a control to see its assigned key in the bottom information area. Binding prompts also appear there. Held controls light up. Press **Esc** to cancel or **Backspace** to clear the binding. Assigning a key to another button moves it from the previous button.
 
 | Default key | Controller input | Typical use |
 |---|---|---|
@@ -113,7 +113,7 @@ The Mac sender uses the same controller body as the Windows editor, with raised 
 
 Every controller button can be bound: A/B/X/Y, bumpers, triggers, View, Menu, Xbox, D-pad directions, and stick clicks. Tilt drives the left stick. Trigger keys ramp up smoothly while held.
 
-Keep the sender window in front: it reads keys only while focused. Pressed buttons light up blue. **Fixed throttle** holds the right trigger at a chosen level; set it to 0 to turn it off.
+Keep the sender window in front: it reads keys only while focused. Pressed buttons light up blue. Hold the key assigned to **RT** to accelerate and release it to ease off the throttle.
 
 **Invert** is enabled by default in the Mac sender. Change it if steering goes the wrong way. Saved bindings take priority over defaults; use **Reset to defaults** to restore the table above.
 

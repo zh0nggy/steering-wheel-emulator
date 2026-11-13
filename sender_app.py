@@ -280,9 +280,6 @@ class SenderEngine:
             held_rt, held_lt, buttons = self.keys.state()
             throttle = throttle_ramp.update(held_rt, dt)
             brake = brake_ramp.update(held_lt, dt)
-            if cfg["throttle"] > 0.0:
-                # Fixed throttle (cruise): never less than the slider value.
-                throttle = max(throttle, cfg["throttle"])
 
             self._read_echoes(loop_start)
 
@@ -367,7 +364,6 @@ class SenderApp:
         self.min_cutoff = tk.DoubleVar(value=1.0)
         self.beta = tk.DoubleVar(value=0.3)
         self.invert = tk.BooleanVar(value=True)
-        self.throttle = tk.DoubleVar(value=0.0)
         bindings = self.load_bindings()
 
         pad = {"padx": 12, "pady": 5}
@@ -445,14 +441,14 @@ class SenderApp:
         pedals = tk.LabelFrame(right, text="Controller (keep this window in front)")
         # Stretch to the window's full height so both columns end on one line.
         pedals.pack(fill="both", expand=True, **pad)
+        binding_info = tk.Frame(pedals)
+        binding_info.pack(side="bottom", fill="x", padx=8,
+                          pady=(controller_view.ControllerView.ROW_GAP, 4))
         self.controller = controller_view.ControllerView(
-            pedals, bindings, on_change=self._bindings_changed)
+            pedals, bindings, on_change=self._bindings_changed, hint_parent=binding_info)
         self.controller.pack(padx=4, pady=(4, 0))
         self.keys.bindings = dict(bindings)
         self.keys.intercept = self.controller.handle_key
-        cruise = tk.Frame(pedals)
-        cruise.pack(fill="x", padx=4, pady=(controller_view.ControllerView.ROW_GAP, 4))
-        app_common.labeled_scale(cruise, 0, "Fixed throttle\n(0 = off)", self.throttle, 0, 1, 0.05)
 
         root = outer
         root.protocol("WM_DELETE_WINDOW", self.close)
@@ -477,7 +473,7 @@ class SenderApp:
     def settings(self):
         return {"range": max(1.0, self.range.get()),
                 "min_cutoff": max(0.05, self.min_cutoff.get()), "beta": self.beta.get(),
-                "invert": self.invert.get(), "throttle": self.throttle.get()}
+                "invert": self.invert.get()}
 
     @staticmethod
     def load_bindings():
