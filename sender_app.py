@@ -16,7 +16,8 @@ list here automatically -- no ipconfig needed.
 LATENCY: the sensor is polled every millisecond and a packet goes out as soon
 as a new sample arrives (up to MAX_RATE per second), instead of on a fixed
 100 Hz timer. Steering runs through a One Euro filter, which smooths jitter
-when you hold still without adding lag when you turn. The receiver echoes
+when you hold still without adding lag when you turn. Android's steering
+acceleration adds virtual rotation during fast turns. The receiver echoes
 packets back, so the window shows the measured round-trip time.
 
 KEYS ARE READ FROM THIS WINDOW, not globally like mac_sender.py. Keep it in
@@ -179,6 +180,7 @@ class SenderEngine:
         self.error = None
         self._smoothed = None
         self._filter = app_common.OneEuroFilter()
+        self._acceleration_reset = threading.Event()
         self.rtt = app_common.RollingStats(1.0)
         self.send_rate = app_common.RollingStats(1.0)
         self._stop = threading.Event()
@@ -192,6 +194,7 @@ class SenderEngine:
 
     def calibrate(self):
         self.centre = self._smoothed
+        self._acceleration_reset.set()
         return self.centre
 
     def stop(self):
@@ -231,6 +234,9 @@ class SenderEngine:
 
     def _loop(self, imu):
         fused_available = imu.orientation() is not None
+        # Android accelerates in degrees against its fixed 90-degree sensor
+        # span, before the user-selected Range scales the virtual angle.
+        acceleration = app_common.SteeringAcceleration(90.0)
         throttle_ramp = Ramp(0.35, 0.18)
         brake_ramp = Ramp(0.35, 0.18)
         seq = rejected = nodata = 0
@@ -242,11 +248,25 @@ class SenderEngine:
         prev_loop = last_send = time.monotonic()
         last_frame = None
         last_target = None
+        last_range = None
         st = self.status
 
         while not self._stop.is_set():
             loop_start = time.monotonic()
             cfg = self.settings
+            target = self.target
+            if (target != last_target or cfg["range"] != last_range
+                    or self._acceleration_reset.is_set()):
+                self._acceleration_reset.clear()
+                acceleration.reset()
+                # A reconnect/calibration can happen while sensor data is
+                # unavailable. Drop the old boost from keepalive packets too.
+                if self._smoothed is not None and self.centre is not None:
+                    offset = wrap(self._smoothed - self.centre)
+                steer = protocol.clamp(offset / cfg["range"], -1.0, 1.0)
+                if cfg["invert"]:
+                    steer = -steer
+            last_range = cfg["range"]
             st["mode"] = ("fused (gyro + accel)" if fused_available else
                           "gravity only (fused unavailable)")
             self._filter.min_cutoff = cfg["min_cutoff"]
@@ -271,7 +291,8 @@ class SenderEngine:
                 if self.centre is None:
                     self.centre = self._smoothed  # until the user calibrates properly
                 offset = wrap(self._smoothed - self.centre)
-                steer = protocol.clamp(offset / cfg["range"], -1.0, 1.0)
+                virtual_offset = acceleration.update(offset, dt)
+                steer = protocol.clamp(virtual_offset / cfg["range"], -1.0, 1.0)
                 if cfg["invert"]:
                     steer = -steer
 
@@ -283,7 +304,6 @@ class SenderEngine:
 
             self._read_echoes(loop_start)
 
-            target = self.target
             if target is None and last_target is not None:
                 # Just pressed Stop: centre the car and release every button
                 # on the way out.

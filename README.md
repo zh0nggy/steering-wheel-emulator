@@ -92,6 +92,8 @@ The Mac release is a ZIP of the sender scripts and launcher. It still needs Pyth
 
 To steer, roll the laptop left and right like tilting a tray. Spinning it flat on a table does not produce the same motion. Motion sensor support depends on the MacBook model.
 
+The Mac sender window uses the same steering acceleration as Android: faster turns add virtual rotation, while slow turns keep their normal response. The boost fades near centre and resets when you calibrate, change Range, or reconnect.
+
 If macOS blocks the launcher, allow it through **System Settings → Privacy & Security → Open Anyway**, where available. Alternatively, from inside the extracted sender folder, remove its download quarantine:
 
 ```bash

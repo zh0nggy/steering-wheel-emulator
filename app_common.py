@@ -194,6 +194,44 @@ class OneEuroFilter:
         return self.value
 
 
+class SteeringAcceleration:
+    """Android's speed-dependent virtual rotation, in calibrated degrees.
+
+    Keep the constants and calculation in sync with SteeringAcceleration in
+    android/app/src/main/java/com/tiltwheel/controller/Filters.kt.
+    """
+
+    def __init__(self, full_scale):
+        self.full_scale = full_scale
+        self.reset()
+
+    def reset(self):
+        self._last_offset = None
+        self._correction = 0.0
+
+    def update(self, offset, dt):
+        previous = self._last_offset
+        self._last_offset = offset
+        magnitude = abs(offset)
+        centre_tolerance = 0.5
+        if (previous is None or magnitude <= centre_tolerance or offset * previous < 0.0
+                or dt <= 0.0 or dt > 0.1):
+            self._correction = 0.0
+            return offset
+
+        delta = offset - previous
+        speed = abs(delta) / dt
+        # Gain rises smoothly from 1x at 30 deg/s to 1.8x at 200 deg/s.
+        t = max(0.0, min(1.0, (speed - 30.0) / 170.0))
+        extra_gain = 0.8 * t * t * (3.0 - 2.0 * t)
+        direction = 1.0 if offset > 0.0 else -1.0
+        max_correction = max(0.0, min(20.0, self.full_scale - magnitude))
+        self._correction = max(-0.5 * magnitude, min(
+            max_correction, self._correction + direction * delta * extra_gain))
+        centre_blend = min(1.0, (magnitude - centre_tolerance) / (12.0 - centre_tolerance))
+        return offset + direction * self._correction * centre_blend
+
+
 class RollingStats:
     """Average and maximum of samples from the last `window` seconds."""
 
