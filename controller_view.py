@@ -2,7 +2,7 @@
 
 Click a button on the drawing, then press the key you want for it. Escape
 cancels, Backspace/Delete clears the binding. Bound controls show their
-assigned keys; hover for full names. Held controls light up on the drawing.
+assigned keys; instructions stay below the drawing. Held controls light up.
 
 Bindings are {target: tk keysym}. Targets are the protocol.BUTTONS names plus
 "RT" and "LT" for the analog triggers (held key = pedal ramps up).
@@ -14,7 +14,7 @@ from tkinter import font as tkfont
 from app_common import is_dark
 from controller_art import ControllerArtwork, FACE_COLORS
 
-# Display names for keysyms in hover instructions.
+# Short display names for keys assigned to controller buttons.
 KEY_LABELS = {
     "Shift_L": "LShf", "Shift_R": "RShf", "Control_L": "LCtl",
     "Control_R": "RCtl", "Alt_L": "LOpt", "Alt_R": "ROpt",
@@ -97,7 +97,6 @@ class ControllerView(ControllerArtwork, tk.Frame):
         self.bindings = dict(bindings)
         self.on_change = on_change
         self.picking = None
-        self.hovered_target = None
         self.held_targets = set()
         self.listeners = []
         self.shapes = {}   # target -> canvas item to recolour
@@ -219,12 +218,9 @@ class ControllerView(ControllerArtwork, tk.Frame):
         if self.picking:
             text = (f"Press a key for {TARGET_NAMES[self.picking]}.  "
                     "Esc = cancel, Backspace = clear.")
-        elif self.BINDING_HINTS and self.hovered_target is not None:
-            key = self.bindings.get(self.hovered_target)
-            binding = WIDE_LABELS.get(key, key_label(key)) if key else "Unbound"
-            text = f"{TARGET_NAMES[self.hovered_target]}: {binding}. Click to change."
         elif self.BINDING_HINTS:
-            text = ""
+            text = ("Click a controller button, then press a key to bind it.\n"
+                    "Esc cancels. Backspace clears. Blue outline = assigned.")
         else:
             text = "Click a control to bind a Mac key. Blue outline = bound."
         self.hint.config(text=text + (f"  {extra}" if extra else ""),
@@ -232,15 +228,9 @@ class ControllerView(ControllerArtwork, tk.Frame):
 
     def _hover(self, target):
         self.canvas.config(cursor="hand2")
-        self.hovered_target = target
-        if self.BINDING_HINTS:
-            self._set_hint()
 
     def _leave(self):
         self.canvas.config(cursor="")
-        self.hovered_target = None
-        if self.BINDING_HINTS:
-            self._set_hint()
 
     def start_pick(self, target):
         previous, self.picking = self.picking, target
