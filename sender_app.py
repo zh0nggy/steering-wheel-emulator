@@ -392,13 +392,14 @@ class SenderApp:
         # --- where to send ---
         conn = tk.LabelFrame(root, text="Windows PC")
         conn.pack(fill="x", **pad)
+        conn.columnconfigure(1, weight=1)
         self.pc_list = tk.Listbox(conn, height=3, width=40, exportselection=False)
-        self.pc_list.grid(row=0, column=0, columnspan=3, sticky="we", pady=(4, 2))
+        self.pc_list.grid(row=0, column=0, columnspan=3, sticky="we", padx=4, pady=(4, 6))
         self.pc_list.bind("<<ListboxSelect>>", self.pick_pc)
-        tk.Label(conn, text="IP").grid(row=1, column=0, sticky="w")
-        tk.Entry(conn, textvariable=self.host, width=16).grid(row=1, column=1, sticky="w")
+        tk.Label(conn, text="IP").grid(row=1, column=0, sticky="w", padx=(4, 6), pady=(0, 4))
+        tk.Entry(conn, textvariable=self.host, width=16).grid(row=1, column=1, sticky="we", pady=(0, 4))
         self.send_btn = tk.Button(conn, text="Start sending", width=14, command=self.toggle_send)
-        self.send_btn.grid(row=1, column=2, sticky="e", pady=4)
+        self.send_btn.grid(row=1, column=2, sticky="e", padx=(8, 4), pady=(0, 4))
 
         # --- live view ---
         live = tk.Frame(root)
