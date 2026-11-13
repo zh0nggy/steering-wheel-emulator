@@ -1,14 +1,15 @@
 """Clickable Xbox-controller picture for binding Mac keys to pad buttons.
 
 Click a button on the drawing, then press the key you want for it. Escape
-cancels, Backspace/Delete clears the binding. Hover to see assigned keys;
-held controls light up on the drawing.
+cancels, Backspace/Delete clears the binding. Bound controls show their
+assigned keys; hover for full names. Held controls light up on the drawing.
 
 Bindings are {target: tk keysym}. Targets are the protocol.BUTTONS names plus
 "RT" and "LT" for the analog triggers (held key = pedal ramps up).
 """
 
 import tkinter as tk
+from tkinter import font as tkfont
 
 from app_common import is_dark
 from controller_art import ControllerArtwork, FACE_COLORS
@@ -101,6 +102,7 @@ class ControllerView(ControllerArtwork, tk.Frame):
         self.listeners = []
         self.shapes = {}   # target -> canvas item to recolour
         self.labels = {}   # target -> text or icon, kept identical to Windows
+        self.key_labels = {}  # replacement text for bound D-pad/Xbox icons
 
         # Same background as the window, so the drawing sits on it rather than
         # in a pale box; then colours to suit a light or dark window.
@@ -125,7 +127,7 @@ class ControllerView(ControllerArtwork, tk.Frame):
         # Shared coordinates after fitting the drawing beneath the top strip.
         self.offset = top + self.body_shift
         # Preserve the same silhouette and proportions as the Windows drawing.
-        lowest = max(self.canvas.bbox(i)[3] for i in drawn)
+        lowest = max(bounds[3] for item in drawn if (bounds := self.canvas.bbox(item)) is not None)
         self._natural_height = lowest + 2
         self.canvas.config(height=self._natural_height)
         self._refresh_all()
@@ -172,7 +174,12 @@ class ControllerView(ControllerArtwork, tk.Frame):
             label = c.create_polygon([coord for dx, dy in icon_points for coord in (x + dx, y + dy)])
         self.shapes[target] = item
         self.labels[target] = label
-        for tag in (item, label):
+        items = [item, label]
+        if icon_points is not None and self.BINDING_HINTS:
+            key_text = c.create_text(*label_at, text="", state="hidden")
+            self.key_labels[target] = key_text
+            items.append(key_text)
+        for tag in items:
             c.tag_bind(tag, "<Button-1>", lambda _e, t=target: self.start_pick(t))
             c.tag_bind(tag, "<Enter>", lambda _e, t=target: self._hover(t))
             c.tag_bind(tag, "<Leave>", lambda _e: self._leave())
@@ -182,6 +189,26 @@ class ControllerView(ControllerArtwork, tk.Frame):
     def _refresh(self, target):
         self.paint_target(target, target in self.bindings,
                           held=target in self.held_targets, picking=target == self.picking)
+        key = self.bindings.get(target)
+        if target in self.key_labels:
+            self.canvas.itemconfig(self.labels[target], state="hidden" if key else "normal")
+            label = self.key_labels[target]
+            self.canvas.itemconfig(label, state="normal" if key else "hidden")
+        else:
+            label = self.labels[target]
+        if key:
+            text = key_label(key)
+            coords = self.canvas.coords(self.shapes[target])
+            width = max(coords[::2]) - min(coords[::2]) - 4
+            height = max(coords[1::2]) - min(coords[1::2]) - 4
+            size = 11 if len(text) == 1 else 8
+            while size > 5:
+                font = tkfont.Font(root=self.canvas, family="Helvetica", size=size, weight="bold")
+                if font.measure(text) <= width and font.metrics("linespace") <= height:
+                    break
+                size -= 1
+            self.canvas.itemconfig(label, text=text, font=("Helvetica", size, "bold"),
+                                   fill=self.canvas.itemcget(self.labels[target], "fill"))
 
     def _refresh_all(self):
         for target in self.shapes:

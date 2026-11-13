@@ -53,6 +53,8 @@ def render_controller_image(canvas):
     art = Image.new("RGB", (width * _SCALE, height * _SCALE), background)
     draw = ImageDraw.Draw(art)
     for item in canvas.find_all():
+        if canvas.itemcget(item, "state") == "hidden":
+            continue
         kind = canvas.type(item)
         if kind not in ("polygon", "rectangle", "oval", "text"):
             continue
