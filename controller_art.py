@@ -57,8 +57,17 @@ def render_controller_image(canvas):
     if Image is None:
         return None
 
+    # Resolve through Tk, which knows native names such as macOS's
+    # SystemTextColor. Pillow only understands its own color names/hex values.
+    # Keep this cache local: system colors can change with the appearance.
+    @lru_cache(maxsize=None)
+    def rgb(color):
+        if not color:
+            return None
+        return tuple(channel >> 8 for channel in canvas.winfo_rgb(color))
+
     width, height = int(canvas["width"]), int(canvas["height"])
-    background = tuple(channel >> 8 for channel in canvas.winfo_rgb(canvas["background"]))
+    background = rgb(canvas["background"])
     art = Image.new("RGB", (width * _SCALE, height * _SCALE), background)
     draw = ImageDraw.Draw(art)
     for item in canvas.find_all():
@@ -68,7 +77,7 @@ def render_controller_image(canvas):
         if kind not in ("polygon", "rectangle", "oval", "text"):
             continue
         coords = [coord * _SCALE for coord in canvas.coords(item)]
-        fill = canvas.itemcget(item, "fill") or None
+        fill = rgb(canvas.itemcget(item, "fill"))
         if kind == "text":
             text = canvas.itemcget(item, "text")
             if not text:
@@ -86,7 +95,7 @@ def render_controller_image(canvas):
                       text, font=font, fill=fill)
             continue
 
-        outline = canvas.itemcget(item, "outline") or None
+        outline = rgb(canvas.itemcget(item, "outline"))
         stroke = round(float(canvas.itemcget(item, "width")) * _SCALE)
         if kind == "polygon":
             points = list(zip(coords[::2], coords[1::2]))

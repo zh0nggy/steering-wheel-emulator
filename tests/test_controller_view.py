@@ -160,6 +160,39 @@ class ControllerViewTests(unittest.TestCase):
         self.assertIsNot(original_art, view._art)
 
     @unittest.skipIf(controller_art.Image is None, "Pillow is optional on Windows")
+    def test_renderer_resolves_native_system_colors_before_pillow_draws(self):
+        view = ControllerView(self.root, DEFAULT_BINDINGS)
+        canvas = view.canvas
+        expected = controller_art.render_controller_image(canvas)
+        itemcget, winfo_rgb = canvas.itemcget, canvas.winfo_rgb
+        # Simulate Aqua returning native color names for fills and outlines,
+        # including text, polygons and ovals, without needing a Mac display.
+        native_colors = {}
+        for item in canvas.find_all():
+            if canvas.type(item) not in ("polygon", "rectangle", "oval", "text"):
+                continue
+            for option in ("fill",) if canvas.type(item) == "text" else ("fill", "outline"):
+                color = itemcget(item, option)
+                if color and color not in native_colors:
+                    native_colors[color] = f"SystemColor{len(native_colors)}"
+        first_color = next(iter(native_colors))
+        native_colors[first_color] = "SystemTextColor"
+        resolved = {name: winfo_rgb(color) for color, name in native_colors.items()}
+
+        def native_itemcget(item, option):
+            value = itemcget(item, option)
+            return native_colors.get(value, value) if option in ("fill", "outline") else value
+
+        def native_rgb(color):
+            return resolved[color] if color in resolved else winfo_rgb(color)
+
+        with patch.object(canvas, "itemcget", side_effect=native_itemcget), patch.object(
+                canvas, "winfo_rgb", side_effect=native_rgb) as lookup:
+            actual = controller_art.render_controller_image(canvas)
+        lookup.assert_any_call("SystemTextColor")
+        self.assertEqual(expected.tobytes(), actual.tobytes())
+
+    @unittest.skipIf(controller_art.Image is None, "Pillow is optional on Windows")
     def test_dark_shell_edges_contain_antialiased_coverage_pixels(self):
         view = ControllerView(self.root, DEFAULT_BINDINGS)
         view.canvas.configure(background="#333333")
