@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import Mock, patch
 
 import controller_art
-import controller_view
 from controller_view import ControllerView, DEFAULT_BINDINGS, TARGET_NAMES
 from phone_layout import PhoneControllerView
 
@@ -95,8 +94,7 @@ class ControllerViewTests(unittest.TestCase):
         idle = self.pixels(view)
         initial_art = view._art
         view.show_held({"A", "LT"})
-        if not view._native_art:
-            self.assertIsNot(initial_art, view._art)
+        self.assertIsNot(initial_art, view._art)
         self.assertNotEqual(idle, self.pixels(view))
         held_art = view._art
         view.show_held({"A", "LT"})
@@ -118,29 +116,37 @@ class ControllerViewTests(unittest.TestCase):
         self.assertEqual(original, self.pixels(view))
 
     def test_binding_still_works_without_optional_smooth_renderer(self):
-        with patch.object(controller_art, "Image", None):
+        with patch.object(controller_art, "Image", None), patch(
+                "controller_view.configure_controller_canvas"):
+            # Windows still supports a dependency-free source checkout.
             view = ControllerView(self.root, DEFAULT_BINDINGS)
             view.start_pick("DPAD_RIGHT")
             view.handle_key("Right")
             self.assertEqual("Right", view.bindings["DPAD_RIGHT"])
             self.assertFalse(view.canvas.find_withtag("controller_art"))
 
-    def test_mac_configuration_enables_line_and_text_antialiasing_only_for_aqua(self):
+    def test_mac_requires_pillow_instead_of_silently_using_rough_outlines(self):
         for system in ("aqua", "win32", "x11"):
             with self.subTest(system=system):
                 canvas = Mock()
                 canvas.tk.call.return_value = system
-                self.assertEqual(system == "aqua", controller_art.configure_controller_canvas(canvas))
-                if system == "aqua":
-                    canvas.tk.setvar.assert_any_call("::tk::mac::CGAntialiasLimit", 0)
-                    canvas.tk.setvar.assert_any_call("::tk::mac::antialiasedtext", 1)
-                else:
-                    canvas.tk.setvar.assert_not_called()
+                with patch.object(controller_art, "Image", None):
+                    if system == "aqua":
+                        with self.assertRaisesRegex(RuntimeError, "pip install Pillow"):
+                            controller_art.configure_controller_canvas(canvas)
+                    else:
+                        controller_art.configure_controller_canvas(canvas)
+                with patch.object(controller_art, "Image", Mock()):
+                    controller_art.configure_controller_canvas(canvas)
 
-    def test_native_drawing_has_no_bitmap_overlay_and_keeps_binding_and_press_feedback(self):
-        with patch.object(controller_view, "configure_controller_canvas", return_value=True):
-            view = ControllerView(self.root, DEFAULT_BINDINGS)
-        self.assertFalse(view.canvas.find_withtag("controller_art"))
+    @unittest.skipIf(controller_art.Image is None, "Pillow is optional on Windows")
+    def test_smooth_overlay_keeps_binding_and_press_feedback(self):
+        view = ControllerView(self.root, DEFAULT_BINDINGS)
+        overlay, = view.canvas.find_withtag("controller_art")
+        self.assertEqual("image", view.canvas.type(overlay))
+        # Disabled artwork lets the real controller buttons receive clicks.
+        self.assertEqual("disabled", view.canvas.itemcget(overlay, "state"))
+        original_art = view._art
         normal = view.canvas.itemcget(view.shapes["LT"], "fill")
         view.show_held({"LT"})
         self.assertNotEqual(normal, view.canvas.itemcget(view.shapes["LT"], "fill"))
@@ -150,7 +156,22 @@ class ControllerViewTests(unittest.TestCase):
         view.handle_key("q")
         self.assertEqual("q", view.bindings["A"])
         self.assertEqual("Q", view.canvas.itemcget(view.labels["A"], "text"))
-        self.assertFalse(view.canvas.find_withtag("controller_art"))
+        self.assertTrue(view.canvas.find_withtag("controller_art"))
+        self.assertIsNot(original_art, view._art)
+
+    @unittest.skipIf(controller_art.Image is None, "Pillow is optional on Windows")
+    def test_dark_shell_edges_contain_antialiased_coverage_pixels(self):
+        view = ControllerView(self.root, DEFAULT_BINDINGS)
+        view.canvas.configure(background="#333333")
+        view.canvas.itemconfigure(view.body, fill="#39383f", outline="#b8b5c3")
+        image = controller_art.render_controller_image(view.canvas)
+        # Only the sloped left shell, away from buttons/text. A native,
+        # unsmoothed raster has just the background, fill and outline colors.
+        edge = image.crop((10, 150, 70, 260))
+        base_colors = {(51, 51, 51), (57, 56, 63), (184, 181, 195)}
+        coverage_colors = set(edge.getdata()) - base_colors
+        self.assertGreater(len(coverage_colors), 50)
+        self.assertEqual((view.W, view._natural_height), image.size)
 
 
 if __name__ == "__main__":

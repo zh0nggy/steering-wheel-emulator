@@ -1,7 +1,6 @@
 """Shared Mac/Windows controller artwork, with optional smooth rendering."""
 
 from functools import lru_cache
-from tkinter import TclError
 
 from app_common import is_dark
 
@@ -19,18 +18,11 @@ _CURVE_STEPS = 96
 
 
 def configure_controller_canvas(canvas):
-    """Use Aqua's native antialiased drawing rather than scaling a 1x bitmap."""
-    native = canvas.tk.call("tk", "windowingsystem") == "aqua"
-    if native:
-        # Tk links these Tcl variables to its Core Graphics drawing settings.
-        # https://www.tcl-lang.org/man/tcl8.6/TkCmd/tk_mac.htm
-        for name, value in (("::tk::mac::CGAntialiasLimit", 0),
-                            ("::tk::mac::antialiasedtext", 1)):
-            try:
-                canvas.tk.setvar(name, value)
-            except TclError:
-                pass  # Older Tk builds still retain their native drawing path.
-    return native
+    """Require the smooth renderer on Mac instead of silently drawing jaggies."""
+    if Image is None and canvas.tk.call("tk", "windowingsystem") == "aqua":
+        raise RuntimeError(
+            "The Mac controller drawing needs Pillow. Install it with the Python "
+            "used to start the sender: python3 -m pip install Pillow")
 
 
 def _cubic_polyline(points):
@@ -251,11 +243,9 @@ class ControllerArtwork:
             self._button(target, shape, center, icon_points=arrow)
 
     def _redraw_art(self):
-        if self._native_art:
-            # Keep vector paths/text at the display's native resolution on Mac.
-            self.canvas.delete("controller_art")
-            self._art = None
-            return
+        # Aqua's polygon drawing quantizes the outline even with its global
+        # antialiasing settings enabled. Use the same supersampled image on
+        # Mac as on Windows; keep the canvas shapes underneath for hit testing.
         art = render_controller(self.canvas)
         if art is not None:
             self.canvas.delete("controller_art")

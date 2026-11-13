@@ -446,7 +446,8 @@ class SenderApp:
         binding_info.pack(side="bottom", fill="x", padx=8,
                           pady=(controller_view.ControllerView.ROW_GAP, 4))
         self.controller = controller_view.ControllerView(
-            pedals, bindings, on_change=self._bindings_changed, hint_parent=binding_info)
+            pedals, bindings, on_change=self._bindings_changed, hint_parent=binding_info,
+            reset_parent=pedals)
         self.controller.pack(padx=4, pady=(4, 0))
         self.keys.bindings = dict(bindings)
         self.keys.intercept = self.controller.handle_key

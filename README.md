@@ -78,7 +78,7 @@ The Mac release is a ZIP of the sender scripts and launcher. It still needs Pyth
    chmod +x "Start Sender.command"
    ```
 
-6. Double-click **Start Sender.command** in Finder and enter your Mac password when requested. Reading the motion sensor requires admin rights.
+6. Double-click **Start Sender.command** in Finder and enter your Mac password when requested. Reading the motion sensor requires admin rights. The launcher keeps the same Python interpreter and checks that Pillow is available for smooth controller artwork. If it is missing from the elevated Python environment, follow the install command printed in Terminal.
 
    You can also start it from Terminal in the sender folder:
 

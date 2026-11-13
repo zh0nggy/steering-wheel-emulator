@@ -92,7 +92,7 @@ class ControllerView(ControllerArtwork, tk.Frame):
     # Starting height; __init__ trims the canvas to fit the finished drawing.
     W, H = 440, 400
 
-    def __init__(self, parent, bindings, on_change=None, *, hint_parent=None):
+    def __init__(self, parent, bindings, on_change=None, *, hint_parent=None, reset_parent=None):
         super().__init__(parent)
         self.bindings = dict(bindings)
         self.on_change = on_change
@@ -108,16 +108,21 @@ class ControllerView(ControllerArtwork, tk.Frame):
         self.colors = DARK if is_dark(self) else LIGHT
         self.canvas = tk.Canvas(self, width=self.W, height=self.H, bg=self.cget("bg"),
                                 highlightthickness=0)
-        self._native_art = configure_controller_canvas(self.canvas)
+        configure_controller_canvas(self.canvas)
         self.canvas.pack()
         self.hint = tk.Label(hint_parent if hint_parent is not None else self,
                              anchor="w", justify="left", fg=self.colors["hint"],
                              wraplength=self.W, height=2 if self.BINDING_HINTS else 0)
         self.hint.pack(fill="x", pady=(2, 0))
-        # Reset goes in a strip above the drawing, top-right corner.
-        self.reset_btn = tk.Button(self.canvas, text="Reset to defaults",
+        # The sender anchors Reset to the panel so centering the artwork
+        # cannot push the button down. Other views keep it on the canvas.
+        self.reset_btn = tk.Button(reset_parent if reset_parent is not None else self.canvas,
+                                   text="Reset to defaults",
                                    command=self.reset)
-        self.canvas.create_window(self.W - 4, 3, window=self.reset_btn, anchor="ne")
+        if reset_parent is not None:
+            self.reset_btn.place(relx=1, x=-4, y=0, anchor="ne")
+        else:
+            self.canvas.create_window(self.W - 4, 3, window=self.reset_btn, anchor="ne")
         self._draw()
         self.body_shift = self._space_shoulders()
         top = self._drawing_top()
