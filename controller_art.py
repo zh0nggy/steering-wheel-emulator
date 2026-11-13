@@ -1,6 +1,7 @@
 """Shared Mac/Windows controller artwork, with optional smooth rendering."""
 
 from functools import lru_cache
+from tkinter import TclError
 
 from app_common import is_dark
 
@@ -14,6 +15,22 @@ except ImportError:
 
 
 _SCALE = 4
+_CURVE_STEPS = 96
+
+
+def configure_controller_canvas(canvas):
+    """Use Aqua's native antialiased drawing rather than scaling a 1x bitmap."""
+    native = canvas.tk.call("tk", "windowingsystem") == "aqua"
+    if native:
+        # Tk links these Tcl variables to its Core Graphics drawing settings.
+        # https://www.tcl-lang.org/man/tcl8.6/TkCmd/tk_mac.htm
+        for name, value in (("::tk::mac::CGAntialiasLimit", 0),
+                            ("::tk::mac::antialiasedtext", 1)):
+            try:
+                canvas.tk.setvar(name, value)
+            except TclError:
+                pass  # Older Tk builds still retain their native drawing path.
+    return native
 
 
 def _cubic_polyline(points):
@@ -21,8 +38,8 @@ def _cubic_polyline(points):
     result = [points[0]]
     for start in range(0, len(points) - 3, 3):
         segment = points[start:start + 4]
-        for step in range(1, 25):
-            t = step / 24
+        for step in range(1, _CURVE_STEPS + 1):
+            t = step / _CURVE_STEPS
             u = 1 - t
             weights = (u ** 3, 3 * u * u * t, 3 * u * t * t, t ** 3)
             result.append(tuple(sum(value * weight for value, weight in zip(axis, weights))
@@ -185,7 +202,7 @@ class ControllerArtwork:
             for target, reference_x in (("LT", 188), ("RT", 492)):
                 x = self._reference_point(reference_x, 120)[0]
                 points = [v for point in self._trigger_points(x) for v in point]
-                self._button(target, c.create_polygon(points, smooth="raw", splinesteps=24),
+                self._button(target, c.create_polygon(points, smooth="raw", splinesteps=_CURVE_STEPS),
                              (x, self.TRIGGER_TOP + 20))
         else:
             for target, x in (("LT", 20), ("RT", 78)):
@@ -195,11 +212,11 @@ class ControllerArtwork:
             points = [v for x, y in self._LEFT_BUMPER
                       for v in self._reference_point(680 - x if mirror else x, y)]
             label = self._reference_point(492 if mirror else 188, 117)
-            self._button(target, c.create_polygon(points, smooth="raw", splinesteps=24), label)
+            self._button(target, c.create_polygon(points, smooth="raw", splinesteps=_CURVE_STEPS), label)
 
         # Draw the shell in front of the shoulders so they share its edge.
         self.body = c.create_polygon(
-            self._body_points(0), smooth="raw", splinesteps=24,
+            self._body_points(0), smooth="raw", splinesteps=_CURVE_STEPS,
             fill=self.colors["body"], outline=self.colors["outline"], width=2)
         for target in ("LB", "RB"):
             c.tag_raise(self.labels[target])
@@ -234,6 +251,11 @@ class ControllerArtwork:
             self._button(target, shape, center, icon_points=arrow)
 
     def _redraw_art(self):
+        if self._native_art:
+            # Keep vector paths/text at the display's native resolution on Mac.
+            self.canvas.delete("controller_art")
+            self._art = None
+            return
         art = render_controller(self.canvas)
         if art is not None:
             self.canvas.delete("controller_art")

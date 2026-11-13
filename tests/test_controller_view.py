@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import controller_art
+import controller_view
 from controller_view import ControllerView, DEFAULT_BINDINGS, TARGET_NAMES
 from phone_layout import PhoneControllerView
 
@@ -94,7 +95,8 @@ class ControllerViewTests(unittest.TestCase):
         idle = self.pixels(view)
         initial_art = view._art
         view.show_held({"A", "LT"})
-        self.assertIsNot(initial_art, view._art)
+        if not view._native_art:
+            self.assertIsNot(initial_art, view._art)
         self.assertNotEqual(idle, self.pixels(view))
         held_art = view._art
         view.show_held({"A", "LT"})
@@ -122,6 +124,33 @@ class ControllerViewTests(unittest.TestCase):
             view.handle_key("Right")
             self.assertEqual("Right", view.bindings["DPAD_RIGHT"])
             self.assertFalse(view.canvas.find_withtag("controller_art"))
+
+    def test_mac_configuration_enables_line_and_text_antialiasing_only_for_aqua(self):
+        for system in ("aqua", "win32", "x11"):
+            with self.subTest(system=system):
+                canvas = Mock()
+                canvas.tk.call.return_value = system
+                self.assertEqual(system == "aqua", controller_art.configure_controller_canvas(canvas))
+                if system == "aqua":
+                    canvas.tk.setvar.assert_any_call("::tk::mac::CGAntialiasLimit", 0)
+                    canvas.tk.setvar.assert_any_call("::tk::mac::antialiasedtext", 1)
+                else:
+                    canvas.tk.setvar.assert_not_called()
+
+    def test_native_drawing_has_no_bitmap_overlay_and_keeps_binding_and_press_feedback(self):
+        with patch.object(controller_view, "configure_controller_canvas", return_value=True):
+            view = ControllerView(self.root, DEFAULT_BINDINGS)
+        self.assertFalse(view.canvas.find_withtag("controller_art"))
+        normal = view.canvas.itemcget(view.shapes["LT"], "fill")
+        view.show_held({"LT"})
+        self.assertNotEqual(normal, view.canvas.itemcget(view.shapes["LT"], "fill"))
+        view.show_held(set())
+        self.assertEqual(normal, view.canvas.itemcget(view.shapes["LT"], "fill"))
+        view.start_pick("A")
+        view.handle_key("q")
+        self.assertEqual("q", view.bindings["A"])
+        self.assertEqual("Q", view.canvas.itemcget(view.labels["A"], "text"))
+        self.assertFalse(view.canvas.find_withtag("controller_art"))
 
 
 if __name__ == "__main__":

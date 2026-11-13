@@ -12,7 +12,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 
 from app_common import is_dark
-from controller_art import ControllerArtwork, FACE_COLORS
+from controller_art import ControllerArtwork, FACE_COLORS, configure_controller_canvas
 
 # Short display names for keys assigned to controller buttons.
 KEY_LABELS = {
@@ -108,6 +108,7 @@ class ControllerView(ControllerArtwork, tk.Frame):
         self.colors = DARK if is_dark(self) else LIGHT
         self.canvas = tk.Canvas(self, width=self.W, height=self.H, bg=self.cget("bg"),
                                 highlightthickness=0)
+        self._native_art = configure_controller_canvas(self.canvas)
         self.canvas.pack()
         self.hint = tk.Label(hint_parent if hint_parent is not None else self,
                              anchor="w", justify="left", fg=self.colors["hint"],
