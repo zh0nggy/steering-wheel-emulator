@@ -1,8 +1,8 @@
 """Clickable Xbox-controller picture for binding Mac keys to pad buttons.
 
 Click a button on the drawing, then press the key you want for it. Escape
-cancels, Backspace/Delete clears the binding. The artwork matches Windows;
-assigned keys appear below it, and held controls light up on the drawing.
+cancels, Backspace/Delete clears the binding. Hover to see assigned keys;
+held controls light up on the drawing.
 
 Bindings are {target: tk keysym}. Targets are the protocol.BUTTONS names plus
 "RT" and "LT" for the analog triggers (held key = pedal ramps up).
@@ -13,7 +13,7 @@ import tkinter as tk
 from app_common import is_dark
 from controller_art import ControllerArtwork, FACE_COLORS
 
-# Display names for keysyms in the binding summary and hover instructions.
+# Display names for keysyms in hover instructions.
 KEY_LABELS = {
     "Shift_L": "LShf", "Shift_R": "RShf", "Control_L": "LCtl",
     "Control_R": "RCtl", "Alt_L": "LOpt", "Alt_R": "ROpt",
@@ -80,13 +80,14 @@ DARK = {
     "key_text": "#f2f2f2", "label": "#9a9a9a", "hint": "#a8a8a8", "hint_active": "#f0a63a",
 }
 class ControllerView(ControllerArtwork, tk.Frame):
-    """The shared drawing, binding instructions and assigned keys.
+    """The shared drawing with contextual binding instructions.
 
     on_change(bindings) is called whenever a binding is set or cleared.
     """
 
     ROW_GAP = 13
-    SHOW_BINDINGS = True
+    SHOW_HINT = False
+    RAISED_TRIGGERS = True
     # Starting height; __init__ trims the canvas to fit the finished drawing.
     W, H = 440, 400
 
@@ -107,12 +108,10 @@ class ControllerView(ControllerArtwork, tk.Frame):
                                 highlightthickness=0)
         self.canvas.pack()
         self.hint = tk.Label(self, anchor="w", justify="left", fg=self.colors["hint"], wraplength=self.W)
-        self.hint.pack(fill="x", pady=(2, 0))
-        self.binding_summary = None
-        if self.SHOW_BINDINGS:
-            self.binding_summary = tk.Label(self, anchor="w", justify="left",
-                                            fg=self.colors["hint"], wraplength=self.W)
-            self.binding_summary.pack(fill="x", pady=(2, 0))
+        if self.SHOW_HINT:
+            self.hint.pack(fill="x", pady=(2, 0))
+        else:
+            self.hint.config(wraplength=280, relief="solid", borderwidth=1, padx=6, pady=3)
         # Reset goes in a strip above the drawing, top-right corner.
         self.reset_btn = tk.Button(self.canvas, text="Reset to defaults",
                                    command=self.reset)
@@ -197,21 +196,33 @@ class ControllerView(ControllerArtwork, tk.Frame):
             text = "Click a control to bind a Mac key. Blue outline = bound."
         self.hint.config(text=text + (f"  {extra}" if extra else ""),
                          fg=self.colors["hint_active" if self.picking else "hint"])
-        if self.binding_summary is not None:
-            bindings = [f"{self.CONTROL_LABELS.get(target, target)}: {WIDE_LABELS.get(key, key_label(key))}"
-                        for target in self.shapes if (key := self.bindings.get(target)) is not None]
-            self.binding_summary.config(text="   ·   ".join(bindings) if bindings else "No keys assigned.")
+        if not self.SHOW_HINT:
+            self._hide_hint()
+            if self.picking:
+                self._show_hint(self.picking)
+
+    def _hide_hint(self):
+        self.canvas.delete("binding_hint")
+
+    def _show_hint(self, target):
+        self._hide_hint()
+        self.hint.update_idletasks()
+        left, _, _, bottom = self.canvas.bbox(self.shapes[target])
+        x = max(4, min(left, self.W - self.hint.winfo_reqwidth() - 4))
+        y = min(bottom + 6, self._natural_height - self.hint.winfo_reqheight() - 4)
+        self.canvas.create_window(x, y, anchor="nw", window=self.hint, tags="binding_hint")
 
     def _hover(self, target):
         self.canvas.config(cursor="hand2")
-        if self.SHOW_BINDINGS and self.picking is None:
+        if not self.SHOW_HINT and self.picking is None:
             key = self.bindings.get(target)
             binding = WIDE_LABELS.get(key, key_label(key)) if key else "Unbound"
             self.hint.config(text=f"{TARGET_NAMES[target]}: {binding}. Click to change.")
+            self._show_hint(target)
 
     def _leave(self):
         self.canvas.config(cursor="")
-        if self.SHOW_BINDINGS:
+        if not self.SHOW_HINT:
             self._set_hint()
 
     def start_pick(self, target):

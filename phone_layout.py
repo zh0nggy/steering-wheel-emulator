@@ -82,7 +82,8 @@ def save_layout(boxes):
 class PhoneControllerView(ControllerView):
     """Shared controller artwork with phone-layout selection behavior."""
 
-    SHOW_BINDINGS = False
+    SHOW_HINT = True
+    RAISED_TRIGGERS = False
 
     def _refresh(self, target):
         self.paint_target(target, False)

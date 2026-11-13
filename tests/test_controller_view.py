@@ -20,7 +20,7 @@ class ControllerViewTests(unittest.TestCase):
         return controller_art.render_controller_image(view.canvas).tobytes()
 
     @unittest.skipIf(controller_art.Image is None, "Pillow is optional")
-    def test_mac_and_windows_render_identical_controls_for_matching_selections(self):
+    def test_mac_and_windows_keep_identical_controller_body_for_matching_selections(self):
         for targets in ((), tuple(DEFAULT_BINDINGS), tuple(TARGET_NAMES)):
             with self.subTest(targets=targets):
                 bindings = {target: f"F{index + 1}" for index, target in enumerate(targets)}
@@ -28,7 +28,23 @@ class ControllerViewTests(unittest.TestCase):
                 windows = PhoneControllerView(self.root, {})
                 for target in targets:
                     windows.paint_target(target, True)
-                self.assertEqual(self.pixels(windows), self.pixels(mac))
+                # Raised triggers add a header row. Compare the rendered body
+                # geometry relative to that offset, without raster rounding noise.
+                pairs = [(mac.body, windows.body)] + [
+                    (mac.shapes[target], windows.shapes[target])
+                    for target in TARGET_NAMES if target not in ("LT", "RT")
+                ]
+                for mac_item, windows_item in pairs:
+                    mac_coords = mac.canvas.coords(mac_item)
+                    windows_coords = windows.canvas.coords(windows_item)
+                    self.assertEqual(len(mac_coords), len(windows_coords))
+                    for index, (a, b) in enumerate(zip(mac_coords, windows_coords)):
+                        self.assertAlmostEqual(a - (mac.offset if index % 2 else 0),
+                                               b - (windows.offset if index % 2 else 0))
+                    self.assertEqual(mac.canvas.itemcget(mac_item, "fill"),
+                                     windows.canvas.itemcget(windows_item, "fill"))
+                self.assertEqual("polygon", mac.canvas.type(mac.shapes["LT"]))
+                self.assertEqual("polygon", mac.canvas.type(mac.shapes["RT"]))
                 self.assertEqual(set(TARGET_NAMES), set(mac.shapes))
                 mac.destroy()
                 windows.destroy()
@@ -54,8 +70,13 @@ class ControllerViewTests(unittest.TestCase):
         self.assertEqual(DEFAULT_BINDINGS, view.bindings)
         self.assertEqual("A", view.canvas.itemcget(view.labels["A"], "text"))
         self.assertEqual("X", view.canvas.itemcget(view.labels["X"], "text"))
-        self.assertIn("LT: Right Shift", view.binding_summary.cget("text"))
-        self.assertIn("RT: Left Shift", view.binding_summary.cget("text"))
+        self.assertFalse(any(isinstance(child, tk.Label) and child.winfo_manager() == "pack"
+                             for child in view.winfo_children()))
+        view._hover("LT")
+        self.assertIn("Right Shift", view.hint.cget("text"))
+        self.assertTrue(view.canvas.find_withtag("binding_hint"))
+        view._leave()
+        self.assertFalse(view.canvas.find_withtag("binding_hint"))
 
     @unittest.skipIf(controller_art.Image is None, "Pillow is optional")
     def test_picking_and_held_changes_repaint_visible_art_and_preserve_bindings(self):

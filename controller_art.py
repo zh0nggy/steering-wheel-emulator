@@ -139,8 +139,18 @@ class ControllerArtwork:
         return 0
 
     def _drawing_top(self):
-        # LT and RT share the top strip with the window's reset button.
+        if self.RAISED_TRIGGERS:
+            # Keep Reset above the shoulders so it cannot cover the right trigger.
+            return 3 + self.reset_btn.winfo_reqheight() + 8 - (self.TRIGGER_TOP - 2)
+        # The Windows editor keeps its rectangular triggers beside Clear phone.
         return 4 - self.TRIGGER_TOP
+
+    def _trigger_points(self, x):
+        # Android's closed cubic path, offset into the desktop drawing coordinates.
+        y = self.TRIGGER_TOP - 4
+        return ((x - 13, y + 32), (x - 12, y + 17), (x - 10, y + 2), (x, y + 2),
+                (x + 10, y + 2), (x + 12, y + 17), (x + 13, y + 32),
+                (x + 13, y + 32), (x - 13, y + 32), (x - 13, y + 32))
 
     def _reference_point(self, x, y):
         return self.W / 2 + (x - 340) * 0.6, self.BODY_TOP + (y - 120) * 0.6
@@ -169,11 +179,16 @@ class ControllerArtwork:
         c = self.canvas
         self.offset = 0
 
-        # The reference shows the bumpers in the silhouette. Keep the triggers
-        # separately clickable in the top strip rather than adding towers.
-        for target, x in (("LT", 20), ("RT", 78)):
-            y = self.TRIGGER_TOP
-            self._button(target, c.create_rectangle(x, y, x + 44, y + 24), (x + 22, y + 12))
+        if self.RAISED_TRIGGERS:
+            for target, reference_x in (("LT", 188), ("RT", 492)):
+                x = self._reference_point(reference_x, 120)[0]
+                points = [v for point in self._trigger_points(x) for v in point]
+                self._button(target, c.create_polygon(points, smooth="raw", splinesteps=24),
+                             (x, self.TRIGGER_TOP + 20))
+        else:
+            for target, x in (("LT", 20), ("RT", 78)):
+                y = self.TRIGGER_TOP
+                self._button(target, c.create_rectangle(x, y, x + 44, y + 24), (x + 22, y + 12))
         for target, mirror in (("LB", False), ("RB", True)):
             points = [v for x, y in self._LEFT_BUMPER
                       for v in self._reference_point(680 - x if mirror else x, y)]

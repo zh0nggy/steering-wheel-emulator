@@ -102,7 +102,7 @@ xattr -dr com.apple.quarantine .
 
 ### Mac keyboard bindings
 
-The Mac sender uses the same controller artwork as the Windows editor. Click a button on the controller picture, then press the key you want to assign. Blue outlines mark bound controls; the assigned keys appear below the diagram and when hovering over a control. Held controls light up. Press **Esc** to cancel or **Backspace** to clear the binding. Assigning a key to another button moves it from the previous button.
+The Mac sender uses the same controller body as the Windows editor, with raised LT/RT triggers above the bumpers like Android. Click a button on the controller picture, then press the key you want to assign. Blue outlines mark bound controls; hover over a control to see its assigned key. Held controls light up. Press **Esc** to cancel or **Backspace** to clear the binding. Assigning a key to another button moves it from the previous button.
 
 | Default key | Controller input | Typical use |
 |---|---|---|
